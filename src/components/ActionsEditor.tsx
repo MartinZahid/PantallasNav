@@ -1,9 +1,10 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Action, PdtdButton, Product } from '../types';
 import { ACTION_TYPES } from '../lib/pdtd';
 import { useEditor } from '../store';
 
 function defaultValue(type: string, products: Product[], screens: { Index: number }[]): string | number {
-  if (type === 'addProduct') return products[0]?.id ?? 0;
+  if (type === 'addProduct' || type === 'addToList') return products[0]?.id ?? 0;
   if (type === 'gotoScreen') return screens[0]?.Index ?? 1;
   if (type === 'popUp' || type === 'listFlush') return '';
   return 0;
@@ -15,7 +16,7 @@ function actionLabel(type: string): string {
     gotoScreen: 'Ir a pantalla',
     selectProduct: 'Seleccionar producto',
     addToList: 'Agregar a lista',
-    executionOrder: 'Orden de ejecución',
+    executionOrder: 'Fin de secuencia (marcador)',
     finish: 'Terminar',
     deselectProduct: 'Deseleccionar producto',
     rewind: 'Retroceder',
@@ -23,6 +24,116 @@ function actionLabel(type: string): string {
     listFlush: 'Vaciar lista',
   };
   return labels[type] ?? type;
+}
+
+function ProductPicker({
+  value,
+  products,
+  onChange,
+  onFocus,
+}: {
+  value: string | number;
+  products: Product[];
+  onChange: (value: number) => void;
+  onFocus: () => void;
+}) {
+  const selected = products.find((product) => product.id === Number(value));
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const wrapper = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) setQuery(selected ? `${selected.id} · ${selected.name}` : '');
+  }, [open, selected?.id, selected?.name, value]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!wrapper.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return products.slice(0, 10);
+    return products
+      .filter(
+        (product) =>
+          product.name.toLowerCase().includes(needle) ||
+          String(product.id).includes(needle) ||
+          product.code.toLowerCase().includes(needle),
+      )
+      .slice(0, 60);
+  }, [products, query]);
+
+  const choose = (product: Product) => {
+    onChange(product.id);
+    setQuery(`${product.id} · ${product.name}`);
+    setOpen(false);
+  };
+
+  return (
+    <div className="product-picker" ref={wrapper}>
+      <input
+        type="search"
+        value={query}
+        placeholder="Buscar producto por nombre, código o ID…"
+        onFocus={(event) => {
+          onFocus();
+          setOpen(true);
+          event.currentTarget.select();
+        }}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+          setHighlight(0);
+          if (!event.target.value.trim()) onChange(0);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setOpen(true);
+            setHighlight((at) => Math.min(filtered.length - 1, at + 1));
+          } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            setHighlight((at) => Math.max(0, at - 1));
+          } else if (event.key === 'Enter' && open && filtered[highlight]) {
+            event.preventDefault();
+            choose(filtered[highlight]);
+          } else if (event.key === 'Escape') {
+            setOpen(false);
+          }
+        }}
+      />
+      {open ? (
+        <div className="product-picker-menu">
+          {filtered.length ? (
+            filtered.map((product, at) => (
+              <button
+                type="button"
+                key={product.id}
+                className={`product-option ${at === highlight ? 'highlighted' : ''} ${product.id === Number(value) ? 'selected' : ''}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setHighlight(at)}
+                onClick={() => choose(product)}
+              >
+                <span className="product-option-id">{product.id}</span>
+                <span className="product-option-name">{product.name}</span>
+                <span className="product-option-meta">{product.price ? `$${product.price.toFixed(2)}` : product.family}</span>
+              </button>
+            ))
+          ) : (
+            <div className="product-option-empty">Sin resultados. Revisa el nombre o importa productos.</div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function ActionsEditor({
@@ -82,6 +193,8 @@ export function ActionsEditor({
     setActions(next, false);
   };
 
+  const hasMarker = actions.some((action) => action.Type === 'executionOrder');
+
   return (
     <div className="actions-editor">
       <div className="field-heading">
@@ -93,7 +206,7 @@ export function ActionsEditor({
         {actions.map((action, at) => {
           const type = String(action.Type);
           return (
-            <div className="action-row" key={`${at}-${type}`}>
+            <div className={`action-row ${type === 'executionOrder' ? 'marker-row' : ''}`} key={`${at}-${type}`}>
               <span className="action-order">{at + 1}</span>
               <div className="action-fields">
                 <select
@@ -108,20 +221,14 @@ export function ActionsEditor({
                     <option value={type}>{type}</option>
                   ) : null}
                 </select>
-                {type === 'addProduct' ? (
+                {type === 'addProduct' || type === 'addToList' ? (
                   products.length ? (
-                    <select
-                      value={String(action.Value ?? '')}
+                    <ProductPicker
+                      value={action.Value ?? 0}
+                      products={products}
                       onFocus={beginTransaction}
-                      onChange={(event) => changeValue(at, Number(event.target.value))}
-                    >
-                      <option value="">Selecciona producto</option>
-                      {products.map((product) => (
-                        <option key={product.id} value={product.id}>
-                          {product.id} · {product.name}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(productId) => changeValue(at, productId)}
+                    />
                   ) : (
                     <input
                       type="number"
@@ -143,6 +250,8 @@ export function ActionsEditor({
                       </option>
                     ))}
                   </select>
+                ) : type === 'executionOrder' ? (
+                  <div className="action-note">Marca el final de la secuencia. No agrega productos ni navega.</div>
                 ) : type === 'popUp' || type === 'listFlush' ? (
                   <input
                     value={String(action.Value ?? '')}
@@ -169,6 +278,7 @@ export function ActionsEditor({
           );
         })}
       </div>
+      {hasMarker ? <p className="action-help">“Fin de secuencia” es solo un marcador del portal: no ejecuta nada en la caja. Debe quedar al final del botón.</p> : null}
     </div>
   );
 }

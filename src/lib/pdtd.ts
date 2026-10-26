@@ -376,7 +376,122 @@ function elementHtml(button: PdtdButton, index: number, x: number, y: number, wi
   return `<div id="dragEle${index}" class="ui-widget-content resizable item obstacle" style="${style}"><button type="button" class="close close-element delete" aria-label="Close"><span aria-hidden="true">×</span></button>${textareaHtml(button, index)}</div>`;
 }
 
-function syncBodyOriginal(screen: PdtdScreen): void {
+const FUNCTION_TYPES = [
+  'gotoScreen',
+  'popUp',
+  'addProduct',
+  'addToList',
+  'listFlush',
+  'finish',
+  'reset',
+  'rewind',
+  'selectProduct',
+  'deselectProduct',
+] as const;
+
+type FunctionsObject = Record<string, any>;
+
+function actionNumber(value: unknown): number {
+  const result = Number(value);
+  return Number.isFinite(result) ? result : 0;
+}
+
+function actionBoolean(value: unknown): boolean {
+  if (typeof value === 'string') return value.toLowerCase() === 'true' || value === '1';
+  return Boolean(value);
+}
+
+function functionsFromActions(
+  actions: Action[],
+  screens: PdtdScreen[] = [],
+  products: Product[] = [],
+): FunctionsObject {
+  const functions: FunctionsObject = {
+    gotoScreen: { id: 0, name: '', executionOrder: 0 },
+    popUp: { id: 0, name: '', executionOrder: 0 },
+    addProduct: { id: 0, name: '', executionOrder: 0 },
+    addToList: { id: 0, name: '', executionOrder: 0 },
+    listFlush: { executionOrder: 0, value: false },
+    finish: { executionOrder: 0, value: false },
+    reset: { executionOrder: 0, value: false },
+    rewind: { executionOrder: 0, value: false },
+    selectProduct: { executionOrder: 0, value: false },
+    deselectProduct: { executionOrder: 0, value: false },
+  };
+
+  const screenName = (id: number) =>
+    screens.find((screen) => actionNumber(screen.Index) === id)?.Id ?? '';
+  const productName = (id: number) =>
+    products.find((product) => actionNumber(product.id) === id)?.name ?? '';
+
+  let markerOrder: number | null = null;
+  for (const action of actions) {
+    const type = String(action.Type ?? '');
+    const executionOrder = actionNumber(action.Index);
+    if (type === 'executionOrder') {
+      markerOrder = actionNumber(action.Value);
+      continue;
+    }
+    if (type === 'gotoScreen') {
+      const id = actionNumber(action.Value);
+      functions.gotoScreen = { id, name: screenName(id), executionOrder };
+    } else if (type === 'popUp') {
+      const id = actionNumber(action.Value);
+      functions.popUp = { id, name: '', executionOrder };
+    } else if (type === 'addProduct' || type === 'addToList') {
+      const id = actionNumber(action.Value);
+      functions[type] = { id, name: productName(id), executionOrder };
+    } else if (type === 'listFlush' || type === 'finish' || type === 'reset' || type === 'rewind') {
+      functions[type] = { executionOrder, value: actionBoolean(action.Value) };
+    } else if (type === 'selectProduct' || type === 'deselectProduct') {
+      functions[type] = { executionOrder, value: actionBoolean(action.Value) };
+    }
+  }
+
+  if (markerOrder !== null) functions.executionOrder = markerOrder;
+  return functions;
+}
+
+function functionsMatchActions(source: unknown, actions: Action[]): source is FunctionsObject {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return false;
+  const functions = source as FunctionsObject;
+  const active = actions.filter((action) => String(action.Type ?? '') !== 'executionOrder');
+  const seen = new Set<string>();
+
+  for (const action of active) {
+    const type = String(action.Type ?? '');
+    const entry = functions[type];
+    if (!entry || typeof entry !== 'object') return false;
+    if (actionNumber(entry.executionOrder) !== actionNumber(action.Index)) return false;
+    if (type === 'gotoScreen' || type === 'addProduct' || type === 'addToList' || type === 'popUp') {
+      if (actionNumber(entry.id) !== actionNumber(action.Value)) return false;
+    } else if (
+      type === 'selectProduct' ||
+      type === 'deselectProduct' ||
+      type === 'listFlush' ||
+      type === 'finish' ||
+      type === 'reset' ||
+      type === 'rewind'
+    ) {
+      if (actionBoolean(entry.value) !== actionBoolean(action.Value)) return false;
+    } else {
+      return false;
+    }
+    seen.add(type);
+  }
+
+  for (const type of FUNCTION_TYPES) {
+    const entry = functions[type];
+    if (entry && actionNumber(entry.executionOrder) > 0 && !seen.has(type)) return false;
+  }
+  return true;
+}
+
+function syncBodyOriginal(
+  screen: PdtdScreen,
+  screens: PdtdScreen[] = [],
+  products: Product[] = [],
+): void {
   const body = screen.Body;
   const buttons = body.Buttons;
   const previous = screen.BodyOriginal && typeof screen.BodyOriginal === 'object' ? screen.BodyOriginal : {};
@@ -384,7 +499,10 @@ function syncBodyOriginal(screen: PdtdScreen): void {
   const height = Math.max(1, number(previous.height, PORTAL_HEIGHT));
   const fx = width / Math.max(1, number(body.Width, BODY_WIDTH));
   const fy = height / Math.max(1, number(body.Height, BODY_HEIGHT));
+  const previousElements = Array.isArray(previous.elements) ? previous.elements : [];
   const elements = buttons.map((button, index) => {
+    const actions = Array.isArray(button.Actions) ? button.Actions : [];
+    const previousElement = previousElements[index];
     const x = number(button.X) * fx;
     const y = number(button.Y) * fy;
     const w = number(button.Width) * fx;
@@ -407,7 +525,10 @@ function syncBodyOriginal(screen: PdtdScreen): void {
       label: null,
       isSelected: false,
       containmentId: 'body',
-      functions: clone(button.Actions ?? []),
+      functions:
+        previousElement && functionsMatchActions(previousElement.functions, actions)
+          ? clone(previousElement.functions)
+          : functionsFromActions(actions, screens, products),
     };
   });
   screen.BodyOriginal = {
@@ -439,7 +560,11 @@ function syncBodyOriginal(screen: PdtdScreen): void {
   screen.FooterOriginal = screen.FooterOriginal ?? footerOriginal;
 }
 
-function makeWebScreen(compact: PdtdScreen): PdtdScreen {
+function makeWebScreen(
+  compact: PdtdScreen,
+  screens: PdtdScreen[] = [],
+  products: Product[] = [],
+): PdtdScreen {
   const screen = clone(compact);
   screen.BodyOriginal = {
     width: PORTAL_WIDTH,
@@ -465,7 +590,7 @@ function makeWebScreen(compact: PdtdScreen): PdtdScreen {
     hasElements: false,
     elements: [],
   };
-  syncBodyOriginal(screen);
+  syncBodyOriginal(screen, screens, products);
   return screen;
 }
 
@@ -481,16 +606,19 @@ export function webFromProject(project: Project): WebDesign {
         Screens: [],
       };
   base.Name = project.name;
+  const compactScreens = project.screens.map((projectScreen) => projectScreen.compact);
   base.Screens = project.screens.map((projectScreen) => {
     const compact = clone(projectScreen.compact);
-    const screen = projectScreen.webRaw ? clone(projectScreen.webRaw) : makeWebScreen(compact);
+    const screen = projectScreen.webRaw
+      ? clone(projectScreen.webRaw)
+      : makeWebScreen(compact, compactScreens, project.products);
     screen.Index = compact.Index;
     screen.ScreenId = compact.ScreenId;
     screen.Id = compact.Id;
     screen.Header = clone(compact.Header);
     screen.Body = clone(compact.Body);
     screen.Footer = clone(compact.Footer);
-    syncBodyOriginal(screen);
+    syncBodyOriginal(screen, compactScreens, project.products);
     return screen;
   });
   return base;
