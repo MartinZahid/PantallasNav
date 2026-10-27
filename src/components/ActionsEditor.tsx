@@ -18,6 +18,7 @@ function actionLabel(type: string): string {
     addToList: 'Agregar a lista',
     executionOrder: 'Fin de secuencia (marcador)',
     finish: 'Terminar',
+    reset: 'Reiniciar',
     deselectProduct: 'Deseleccionar producto',
     rewind: 'Retroceder',
     popUp: 'Ventana / popup',

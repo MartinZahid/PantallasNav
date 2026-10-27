@@ -33,6 +33,7 @@ export const ACTION_TYPES = [
   'addToList',
   'executionOrder',
   'finish',
+  'reset',
   'deselectProduct',
   'rewind',
   'popUp',
@@ -338,7 +339,7 @@ export function projectFromCaja(data: Json, fileName: string): Project {
     projectScreenFromCompact(normalizeScreen(screen, index + 1, profile), undefined, profile),
   );
   return {
-    name: fileName.replace(/\.pdtd$/i, '').replace(/_Dise?o(?:Web|Caja).*$/i, '').trim() || 'Caja importada',
+    name: fileName.replace(/\.pdtd$/i, '').replace(/_Dise[ñn]o(?:Web|Caja).*$/i, '').trim() || 'Caja importada',
     profileId: profile.id,
     source: 'caja',
     webBase: null,
@@ -377,14 +378,18 @@ export function importProjectText(text: string, fileName: string): Project {
   throw new Error('Formato .pdtd no reconocido.');
 }
 
+function stripPrivateButtonFields(screen: PdtdScreen): PdtdScreen {
+  const clean = clone(screen);
+  for (const zone of [clean.Header, clean.Body, clean.Footer]) {
+    for (const button of zone.Buttons ?? []) {
+      delete (button as Record<string, unknown>).__uid;
+    }
+  }
+  return clean;
+}
+
 export function cajaFromProject(project: Project): PdtdScreen[] {
-  return project.screens.map(({ compact }) => {
-    const screen = clone(compact);
-    screen.Header = clone(compact.Header);
-    screen.Body = clone(compact.Body);
-    screen.Footer = clone(compact.Footer);
-    return screen;
-  });
+  return project.screens.map(({ compact }) => stripPrivateButtonFields(compact));
 }
 
 function escapeHtml(value: string): string {
@@ -672,7 +677,7 @@ export function webFromProject(project: Project): WebDesign {
     screen.Body = clone(compact.Body);
     screen.Footer = clone(compact.Footer);
     syncBodyOriginal(screen, compactScreens, project.products);
-    return screen;
+    return stripPrivateButtonFields(screen);
   });
   return base;
 }

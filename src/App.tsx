@@ -79,13 +79,11 @@ function App() {
       if (editing) return;
       if (command && event.key.toLowerCase() === 'd' && index !== null) {
         event.preventDefault();
-        state.beginTransaction();
         state.duplicateButton(screen.uid, index);
         return;
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && index !== null) {
         event.preventDefault();
-        state.beginTransaction();
         state.deleteButton(screen.uid, index);
         return;
       }
@@ -94,14 +92,11 @@ function App() {
         return;
       }
       if (index !== null && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
-        const button = screen.compact.Body.Buttons[index];
-        if (!button) return;
         event.preventDefault();
         const step = event.shiftKey ? 10 : 1;
         const dx = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
         const dy = event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0;
-        state.beginTransaction();
-        state.updateButton(screen.uid, index, { X: Number(button.X) + dx, Y: Number(button.Y) + dy }, false);
+        state.nudgeButton(screen.uid, index, dx, dy);
       }
     };
     window.addEventListener('keydown', handleKey);

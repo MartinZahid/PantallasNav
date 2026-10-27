@@ -60,6 +60,7 @@ interface EditorState {
   deleteButton: (screenUid: string, index: number) => void;
   moveButtonLayer: (screenUid: string, index: number, direction: -1 | 1) => void;
   beginTransaction: () => void;
+  nudgeButton: (screenUid: string, index: number, dx: number, dy: number) => void;
   undo: () => void;
   redo: () => void;
   exportWeb: () => void;
@@ -68,7 +69,10 @@ interface EditorState {
 }
 
 const HISTORY_LIMIT = 60;
+const NUDGE_WINDOW_MS = 600;
 const LOCAL_KEY = 'editor-pantallas-1280-project-v1';
+
+let nudgeSession: { key: string; at: number } | null = null;
 
 function screenOf(project: Project, screenUid: string): ProjectScreen {
   const screen = project.screens.find((item) => item.uid === screenUid);
@@ -125,7 +129,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({
       previewProject,
       view: 'caja',
-      message: `Vista previa ${profileId === '1080' ? '1080' : '1280'}; a?n no est? aplicada.`,
+      message: `Vista previa ${profileId === '1080' ? '1080' : '1280'}; aún no está aplicada.`,
     });
   },
 
@@ -137,7 +141,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       project: state.previewProject,
       previewProject: null,
       view: 'caja',
-      message: 'Dise?o convertido al nuevo plano.',
+      message: 'Diseño convertido al nuevo plano.',
     });
   },
 
@@ -248,10 +252,34 @@ export const useEditor = create<EditorState>((set, get) => ({
       return { project: { ...state.project, selectedButtonIndex: index } };
     }),
 
-  beginTransaction: () =>
+  beginTransaction: () => {
+    nudgeSession = null;
     set((state) => {
       if (!state.project) return state;
       return pushHistory(state, state.project);
+    });
+  },
+
+  nudgeButton: (screenUid, index, dx, dy) =>
+    set((state) => {
+      if (!state.project) return state;
+      const project = state.project;
+      const screen = project.screens.find((item) => item.uid === screenUid);
+      const button = screen?.compact.Body.Buttons[index];
+      if (!button) return state;
+      const key = `${screenUid}:${index}`;
+      const now = Date.now();
+      const historyPatch =
+        nudgeSession && nudgeSession.key === key && now - nudgeSession.at <= NUDGE_WINDOW_MS
+          ? {}
+          : pushHistory(state, project);
+      nudgeSession = { key, at: now };
+      button.X = Number(button.X) + dx;
+      button.Y = Number(button.Y) + dy;
+      return {
+        ...historyPatch,
+        project: { ...project, selectedScreenUid: screenUid, selectedButtonIndex: index },
+      };
     }),
 
   updateButton: (screenUid, index, patch, record = false) =>
@@ -379,7 +407,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!nextScreen) return;
     nextScreen.compact.Body.Buttons.push(button);
     next.selectedButtonIndex = nextScreen.compact.Body.Buttons.length - 1;
-    set({ ...pushHistory(get(), project), project: next, message: 'Bot?n agregado.' });
+    set({ ...pushHistory(get(), project), project: next, message: 'Botón agregado.' });
   },
 
   duplicateButton: (screenUid, index) => {
@@ -391,12 +419,11 @@ export const useEditor = create<EditorState>((set, get) => ({
     const source = screen.compact.Body.Buttons[index];
     if (!source) return;
     const button = clone(source);
-    button.__uid = uid('button');
     button.X += 10;
     button.Y += 10;
     screen.compact.Body.Buttons.splice(index + 1, 0, button);
     next.selectedButtonIndex = index + 1;
-    set({ ...pushHistory(get(), project), project: next, message: 'Bot?n duplicado.' });
+    set({ ...pushHistory(get(), project), project: next, message: 'Botón duplicado.' });
   },
 
   deleteButton: (screenUid, index) => {
@@ -407,7 +434,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!screen) return;
     screen.compact.Body.Buttons.splice(index, 1);
     next.selectedButtonIndex = null;
-    set({ ...pushHistory(get(), project), project: next, message: 'Bot?n eliminado.' });
+    set({ ...pushHistory(get(), project), project: next, message: 'Botón eliminado.' });
   },
 
   moveButtonLayer: (screenUid, index, direction) => {
@@ -425,7 +452,8 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ ...pushHistory(get(), project), project: next });
   },
 
-  undo: () =>
+  undo: () => {
+    nudgeSession = null;
     set((state) => {
       if (!state.project || !state.history.length || state.previewProject) return state;
       const previous = state.history[state.history.length - 1];
@@ -434,9 +462,11 @@ export const useEditor = create<EditorState>((set, get) => ({
         history: state.history.slice(0, -1),
         future: [clone(state.project), ...state.future].slice(0, HISTORY_LIMIT),
       };
-    }),
+    });
+  },
 
-  redo: () =>
+  redo: () => {
+    nudgeSession = null;
     set((state) => {
       if (!state.project || !state.future.length || state.previewProject) return state;
       const next = state.future[0];
@@ -445,7 +475,8 @@ export const useEditor = create<EditorState>((set, get) => ({
         history: [...state.history, clone(state.project)].slice(-HISTORY_LIMIT),
         future: state.future.slice(1),
       };
-    }),
+    });
+  },
 
   exportWeb: () => {
     if (get().previewProject) {

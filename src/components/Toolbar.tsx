@@ -47,7 +47,7 @@ export function Toolbar() {
 
   const createNewProject = () => {
     const target = profile.id;
-    if (window.confirm(`?Crear un proyecto ${target === '1080' ? '1080' : '1280'} nuevo y descartar el actual?`)) {
+    if (window.confirm(`¿Crear un proyecto ${target === '1080' ? '1080' : '1280'} nuevo y descartar el actual?`)) {
       newProject(target);
     }
   };
@@ -140,9 +140,9 @@ export function Toolbar() {
       {isPreview ? (
         <div className="preview-bar">
           <span>
-            <strong>Vista previa {profile.label}</strong> ? todav?a no est? aplicada.
+            <strong>Vista previa {profile.label}</strong> — todavía no está aplicada.
           </span>
-          <button type="button" className="primary-button" onClick={() => { if (window.confirm('?Convertir el dise?o al plano seleccionado? Se reacomodar?n todas las pantallas.')) applyPreview(); }}>Convertir dise?o</button>
+          <button type="button" className="primary-button" onClick={() => { if (window.confirm('¿Convertir el diseño al plano seleccionado? Se reacomodarán todas las pantallas.')) applyPreview(); }}>Convertir diseño</button>
           <button type="button" className="ghost-button" onClick={cancelPreview}>Cancelar</button>
         </div>
       ) : null}
