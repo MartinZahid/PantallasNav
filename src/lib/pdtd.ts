@@ -411,6 +411,15 @@ export function normalizeProject(input: unknown): Project {
     throw new Error('El proyecto guardado no tiene pantallas.');
   }
   const rawScreens = source.screens as unknown[];
+  for (const raw of rawScreens) {
+    if (!isPlainObject(raw)) {
+      throw new Error('El proyecto guardado contiene una pantalla nula o inv?lida.');
+    }
+    const compact = (raw as Record<string, unknown>).compact;
+    if (!isPlainObject(compact) || !isPlainObject((compact as Record<string, unknown>).Body)) {
+      throw new Error('El proyecto guardado contiene una pantalla vac?a.');
+    }
+  }
   const profileId: ProfileId =
     source.profileId === '1080' || source.profileId === '1280'
       ? source.profileId
@@ -466,7 +475,8 @@ function escapeHtml(value: string): string {
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 function rgb(value: string): string {
@@ -476,8 +486,11 @@ function rgb(value: string): string {
 }
 
 function imageUrl(value: string): string {
-  if (!value) return '';
-  return value.startsWith('data:') ? value : `data:image/png;base64,${value}`;
+  const clean = String(value ?? '').trim().replace(/\s+/g, '');
+  if (!clean) return '';
+  if (/^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(clean)) return clean;
+  if (/^[A-Za-z0-9+/=]+$/.test(clean)) return `data:image/png;base64,${clean}`;
+  return '';
 }
 
 function labelClass(button: PdtdButton): string {
@@ -895,7 +908,6 @@ export function validateProject(project: Project): ValidationIssue[] {
             level: 'warning',
             message: `“${button.Text.Text || i + 1}” se traslapa con “${other.Text.Text || j + 1}”.`,
           });
-          break;
         }
       }
     }

@@ -39,14 +39,12 @@ function ProductPicker({
   onFocus: () => void;
 }) {
   const selected = products.find((product) => product.id === Number(value));
+  const selectedLabel = selected ? `${selected.id} ? ${selected.name}` : '';
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const wrapper = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) setQuery(selected ? `${selected.id} · ${selected.name}` : '');
-  }, [open, selected?.id, selected?.name, value]);
 
   useEffect(() => {
     if (!open) return;
@@ -82,10 +80,11 @@ function ProductPicker({
     <div className="product-picker" ref={wrapper}>
       <input
         type="search"
-        value={query}
-        placeholder="Buscar producto por nombre, código o ID…"
+        value={open ? query : selectedLabel}
+        placeholder="Buscar producto por nombre, c?digo o ID?"
         onFocus={(event) => {
           onFocus();
+          setQuery(selectedLabel);
           setOpen(true);
           event.currentTarget.select();
         }}

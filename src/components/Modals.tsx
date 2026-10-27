@@ -1,42 +1,30 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import type { TemplateId } from '../lib/pdtd';
 import { useEditor } from '../store';
 
 const TEMPLATES: { id: TemplateId; name: string; description: string; preview: string }[] = [
-  { id: 'blank', name: 'Pantalla vacía', description: 'Solo el título. Construye desde cero.', preview: 'blank' },
-  { id: 'grid3', name: 'Cuadrícula 3×3', description: '9 botones de 180×180.', preview: 'grid3' },
-  { id: 'grid2', name: 'Categorías 2×2', description: '4 botones grandes de 280×280.', preview: 'grid2' },
-  { id: 'list20', name: 'Lista 4×5', description: '20 botones de producto de 135×135.', preview: 'list20' },
-  { id: 'grid30', name: 'Guisados 6×5', description: '30 botones compactos de 90×90.', preview: 'grid30' },
+  { id: 'blank', name: 'Pantalla vac?a', description: 'Solo el t?tulo. Construye desde cero.', preview: 'blank' },
+  { id: 'grid3', name: 'Cuadr?cula 3?3', description: '9 botones de 180?180.', preview: 'grid3' },
+  { id: 'grid2', name: 'Categor?as 2?2', description: '4 botones grandes de 280?280.', preview: 'grid2' },
+  { id: 'list20', name: 'Lista 4?5', description: '20 botones de producto de 135?135.', preview: 'list20' },
+  { id: 'grid30', name: 'Guisados 6?5', description: '30 botones compactos de 90?90.', preview: 'grid30' },
 ];
 
-export function TemplatesModal() {
-  const open = useEditor((state) => state.templateOpen);
-  const setOpen = useEditor((state) => state.setTemplateOpen);
+function TemplatesDialog({ screenCount, onClose }: { screenCount: number; onClose: () => void }) {
   const addScreen = useEditor((state) => state.addScreen);
-  const project = useEditor((state) => state.project);
-  const [title, setTitle] = useState('NUEVA PANTALLA');
+  const [title, setTitle] = useState(() => `PANTALLA ${screenCount + 1}`);
   const [template, setTemplate] = useState<TemplateId>('grid3');
 
-  useEffect(() => {
-    if (open) {
-      setTitle(`PANTALLA ${(project?.screens.length ?? 0) + 1}`);
-      setTemplate('grid3');
-    }
-  }, [open, project?.screens.length]);
-
-  if (!open) return null;
-
   return (
-    <div className="modal-backdrop" onMouseDown={() => setOpen(false)}>
+    <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal wide-modal" onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-heading">
           <div>
             <h2>Nueva pantalla</h2>
-            <p>Elige una plantilla y ponle nombre. Después puedes mover todo.</p>
+            <p>Elige una plantilla y ponle nombre. Despu?s puedes mover todo.</p>
           </div>
-          <button type="button" className="icon-button" onClick={() => setOpen(false)}>×</button>
+          <button type="button" className="icon-button" onClick={onClose}>?</button>
         </div>
         <label className="field">
           <span>Nombre de la pantalla</span>
@@ -64,13 +52,31 @@ export function TemplatesModal() {
           ))}
         </div>
         <div className="modal-actions">
-          <button type="button" className="ghost-button" onClick={() => setOpen(false)}>Cancelar</button>
-          <button type="button" className="primary-button" onClick={() => addScreen(template, title.trim() || 'NUEVA PANTALLA')}>
+          <button type="button" className="ghost-button" onClick={onClose}>Cancelar</button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => addScreen(template, title.trim() || 'NUEVA PANTALLA')}
+          >
             Crear pantalla
           </button>
         </div>
       </div>
     </div>
+  );
+}
+
+export function TemplatesModal() {
+  const open = useEditor((state) => state.templateOpen);
+  const setOpen = useEditor((state) => state.setTemplateOpen);
+  const project = useEditor((state) => state.project);
+
+  if (!open) return null;
+  return (
+    <TemplatesDialog
+      screenCount={project?.screens.length ?? 0}
+      onClose={() => setOpen(false)}
+    />
   );
 }
 
@@ -83,11 +89,12 @@ export function ProductsModal() {
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (open) setError('');
-  }, [open]);
-
   if (!open) return null;
+
+  const close = () => {
+    setError('');
+    setOpen(false);
+  };
 
   const load = async (file: File | undefined) => {
     if (!file) return;
@@ -107,18 +114,29 @@ export function ProductsModal() {
   };
 
   return (
-    <div className="modal-backdrop" onMouseDown={() => setOpen(false)}>
+    <div className="modal-backdrop" onMouseDown={close}>
       <div className="modal products-modal" onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-heading">
           <div>
             <h2>Productos</h2>
             <p>Importa el reporte de productos (.xls/.xlsx) para usarlo en las acciones.</p>
           </div>
-          <button type="button" className="icon-button" onClick={() => setOpen(false)}>×</button>
+          <button type="button" className="icon-button" onClick={close}>?</button>
         </div>
         <div className="products-toolbar">
-          <button type="button" className="primary-button" onClick={() => input.current?.click()}>{busy ? 'Leyendo…' : 'Importar Excel'}</button>
-          <input ref={input} type="file" accept=".xls,.xlsx" hidden onChange={(event) => { void load(event.target.files?.[0]); event.target.value = ''; }} />
+          <button type="button" className="primary-button" onClick={() => input.current?.click()}>
+            {busy ? 'Leyendo?' : 'Importar Excel'}
+          </button>
+          <input
+            ref={input}
+            type="file"
+            accept=".xls,.xlsx"
+            hidden
+            onChange={(event) => {
+              void load(event.target.files?.[0]);
+              event.target.value = '';
+            }}
+          />
           <span className="muted">{project?.products.length ?? 0} productos</span>
         </div>
         {error ? <div className="error-box">{error}</div> : null}
@@ -138,10 +156,10 @@ export function ProductsModal() {
               ))}
             </tbody>
           </table>
-          {!project?.products.length ? <div className="empty-table">Aún no hay productos importados.</div> : null}
+          {!project?.products.length ? <div className="empty-table">A?n no hay productos importados.</div> : null}
         </div>
         <div className="modal-actions">
-          <button type="button" className="ghost-button" onClick={() => setOpen(false)}>Cerrar</button>
+          <button type="button" className="ghost-button" onClick={close}>Cerrar</button>
         </div>
       </div>
     </div>
