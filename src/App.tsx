@@ -6,10 +6,14 @@ import { Toolbar } from './components/Toolbar';
 import { TemplatesModal, ProductsModal } from './components/Modals';
 import { ValidationPanel } from './components/ValidationPanel';
 import { useEditor } from './store';
+import { profileForProject } from './lib/profiles';
 import './App.css';
 
 function App() {
   const project = useEditor((state) => state.project);
+  const previewProject = useEditor((state) => state.previewProject);
+  const displayProject = previewProject ?? project;
+  const profile = profileForProject(displayProject);
   const view = useEditor((state) => state.view);
   const newProject = useEditor((state) => state.newProject);
   const projectFromLocal = useEditor((state) => state.projectFromLocal);
@@ -48,6 +52,7 @@ function App() {
       const modal = Boolean(document.querySelector('.modal-backdrop'));
       if (modal) return;
       const state = useEditor.getState();
+      if (state.previewProject) return;
       const currentProject = state.project;
       if (!currentProject?.selectedScreenUid) return;
       const screen = currentProject.screens.find((item) => item.uid === currentProject.selectedScreenUid);
@@ -103,9 +108,9 @@ function App() {
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
-  const screen = project?.screens.find((item) => item.uid === project.selectedScreenUid);
-  const button = screen && project?.selectedButtonIndex !== null && project?.selectedButtonIndex !== undefined
-    ? screen.compact.Body.Buttons[project.selectedButtonIndex]
+  const screen = displayProject?.screens.find((item) => item.uid === displayProject.selectedScreenUid);
+  const button = screen && displayProject?.selectedButtonIndex !== null && displayProject?.selectedButtonIndex !== undefined
+    ? screen.compact.Body.Buttons[displayProject.selectedButtonIndex]
     : null;
 
   return (
@@ -116,15 +121,15 @@ function App() {
         <main className="stage-area">
           {view === 'validate' ? <ValidationPanel /> : <Canvas mode={view === 'caja' ? 'caja' : view === 'portal' ? 'portal' : 'editor'} />}
         </main>
-        {view !== 'validate' ? <PropertiesPanel /> : null}
+        {view !== 'validate' && !previewProject ? <PropertiesPanel /> : null}
       </div>
       <footer className="statusbar">
-        <span className="status-mode">{view === 'editor' ? 'Editor' : view === 'caja' ? 'Caja 1280' : view === 'portal' ? 'Portal (diagnóstico)' : 'Validación'}</span>
+        <span className="status-mode">{view === 'editor' ? 'Editor' : view === 'caja' ? `Caja ${profile.short}` : view === 'portal' ? 'Portal (diagnóstico)' : 'Validación'}</span>
         <span>{screen ? `Pantalla ${String(screen.compact.Index).padStart(2, '0')} · ${screen.compact.Id}` : 'Sin pantalla'}</span>
-        <span>{button ? `Botón ${(project?.selectedButtonIndex ?? 0) + 1} · ${button.Text.Text || 'sin texto'}` : 'Sin selección'}</span>
+        <span>{button ? `Botón ${(displayProject?.selectedButtonIndex ?? 0) + 1} · ${button.Text.Text || 'sin texto'}` : 'Sin selección'}</span>
         <span className="status-spacer" />
         <span>{screen?.compact.Body.Buttons.length ?? 0} botones</span>
-        <span>{project?.products.length ?? 0} productos</span>
+        <span>{displayProject?.products.length ?? 0} productos</span>
         <span className="status-help">Ctrl+Z / Ctrl+D / Supr · Arrastra y suelta las esquinas</span>
       </footer>
       <TemplatesModal />

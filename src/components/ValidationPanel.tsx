@@ -1,12 +1,16 @@
 import { useMemo } from 'react';
 import { validateProject } from '../lib/pdtd';
 import { useEditor } from '../store';
+import { profileForProject } from '../lib/profiles';
 
 export function ValidationPanel() {
-  const project = useEditor((state) => state.project);
+  const sourceProject = useEditor((state) => state.project);
+  const previewProject = useEditor((state) => state.previewProject);
+  const project = previewProject ?? sourceProject;
   const selectScreen = useEditor((state) => state.selectScreen);
   const selectButton = useEditor((state) => state.selectButton);
   const setView = useEditor((state) => state.setView);
+  const profile = profileForProject(project);
   const issues = useMemo(() => (project ? validateProject(project) : []), [project]);
   if (!project) return null;
   const errors = issues.filter((issue) => issue.level === 'error');
@@ -33,7 +37,7 @@ export function ValidationPanel() {
 
       <div className="compat-grid">
         <div className="compat-card">
-          <span className="compat-kicker">Caja 1280</span>
+          <span className="compat-kicker">Caja {profile.short}</span>
           <strong>1:1 en el POS</strong>
           <p>Los botones se muestran con X/Y/Ancho/Alto tal como están en el archivo Caja.</p>
         </div>

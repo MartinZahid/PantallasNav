@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { PdtdButton } from '../types';
-import { clone, isTitle, makeTitle, VISIBLE_HEIGHT, VISIBLE_WIDTH } from '../lib/pdtd';
+import { clone, isTitle, makeTitle } from '../lib/pdtd';
+import { profileForProject } from '../lib/profiles';
 import { useEditor } from '../store';
 import { ActionsEditor } from './ActionsEditor';
 
@@ -71,6 +72,7 @@ function NumberField({
 
 function ButtonEditor() {
   const project = useEditor((state) => state.project);
+  const profile = profileForProject(project);
   const updateButton = useEditor((state) => state.updateButton);
   const beginTransaction = useEditor((state) => state.beginTransaction);
   const deleteButton = useEditor((state) => state.deleteButton);
@@ -186,12 +188,12 @@ function ButtonEditor() {
       <div className="section">
         <div className="section-title">Posición y tamaño</div>
         <div className="grid-4">
-          <NumberField label="X" value={button.X} min={-400} max={VISIBLE_WIDTH} onFocus={beginTransaction} onChange={(value) => setGeometry({ X: value })} />
-          <NumberField label="Y" value={button.Y} min={-400} max={VISIBLE_HEIGHT} onFocus={beginTransaction} onChange={(value) => setGeometry({ Y: value })} />
+          <NumberField label="X" value={button.X} min={-400} max={profile.visibleWidth} onFocus={beginTransaction} onChange={(value) => setGeometry({ X: value })} />
+          <NumberField label="Y" value={button.Y} min={-400} max={profile.visibleHeight} onFocus={beginTransaction} onChange={(value) => setGeometry({ Y: value })} />
           <NumberField label="Ancho" value={button.Width} min={20} onFocus={beginTransaction} onChange={(value) => setGeometry({ Width: value })} />
           <NumberField label="Alto" value={button.Height} min={20} onFocus={beginTransaction} onChange={(value) => setGeometry({ Height: value })} />
         </div>
-        <div className="muted tiny">Área visible de la Caja: {VISIBLE_WIDTH} × {VISIBLE_HEIGHT}.</div>
+        <div className="muted tiny">Area visible de la Caja: {profile.visibleWidth} x {profile.visibleHeight}.</div>
       </div>
 
       <div className="section">
@@ -235,6 +237,7 @@ function ButtonEditor() {
 
 function ScreenEditor() {
   const project = useEditor((state) => state.project);
+  const profile = profileForProject(project);
   const updateScreen = useEditor((state) => state.updateScreen);
   const updateBody = useEditor((state) => state.updateBody);
   const addButton = useEditor((state) => state.addButton);
@@ -259,13 +262,13 @@ function ScreenEditor() {
         </label>
         <NumberField label="Índice" value={screen.compact.Index} min={1} onFocus={beginTransaction} onChange={(value) => updateScreen(screen.uid, { Index: value })} />
         <ColorField label="Fondo del cuerpo" value={screen.compact.Body.BackColor} onFocus={beginTransaction} onChange={(value) => updateBody(screen.uid, { BackColor: value })} />
-        <div className="muted tiny">Cuerpo: {screen.compact.Body.Width} × {screen.compact.Body.Height}. Área visible: {VISIBLE_WIDTH} × {VISIBLE_HEIGHT}.</div>
+        <div className="muted tiny">Cuerpo: {screen.compact.Body.Width} x {screen.compact.Body.Height}. Area visible: {profile.visibleWidth} x {profile.visibleHeight}.</div>
       </div>
       <div className="section">
         <div className="section-title">Crear</div>
         <div className="button-row">
           <button type="button" className="wide-button" onClick={addButton}>+ Botón</button>
-          <button type="button" className="wide-button" onClick={() => { beginTransaction(); const title = clone(makeTitle('NUEVO TITULO')); updateButtonAppend(screen.uid, title); }}>+ Título</button>
+          <button type="button" className="wide-button" onClick={() => { beginTransaction(); const title = clone(makeTitle('NUEVO TITULO', profile)); updateButtonAppend(screen.uid, title); }}>+ Título</button>
         </div>
         <div className="button-row">
           <button type="button" className="small-button" onClick={() => duplicateScreen(screen.uid)}>Duplicar pantalla</button>
@@ -293,6 +296,7 @@ function updateButtonAppend(screenUid: string, button: PdtdButton) {
 
 function ButtonList() {
   const project = useEditor((state) => state.project);
+  const profile = profileForProject(project);
   const selectButton = useEditor((state) => state.selectButton);
   const screen = project?.screens.find((item) => item.uid === project.selectedScreenUid);
   if (!project || !screen) return null;
@@ -304,7 +308,7 @@ function ButtonList() {
       </div>
       <div className="button-list-scroll">
         {screen.compact.Body.Buttons.map((button, index) => {
-          const out = Number(button.X) < 0 || Number(button.Y) < 0 || Number(button.X) + Number(button.Width) > VISIBLE_WIDTH + 0.5 || Number(button.Y) + Number(button.Height) > VISIBLE_HEIGHT + 0.5;
+          const out = Number(button.X) < 0 || Number(button.Y) < 0 || Number(button.X) + Number(button.Width) > profile.visibleWidth + 0.5 || Number(button.Y) + Number(button.Height) > profile.visibleHeight + 0.5;
           const selected = project.selectedButtonIndex === index;
           return (
             <button
@@ -328,12 +332,13 @@ function ButtonList() {
 
 export function PropertiesPanel() {
   const project = useEditor((state) => state.project);
+  const profile = profileForProject(project);
   const index = project?.selectedButtonIndex ?? null;
   return (
     <aside className="properties">
       <div className="panel-heading">
         <span>Propiedades</span>
-        <span className="panel-sub">1280×1024</span>
+        <span className="panel-sub">{profile.label}</span>
       </div>
       <ButtonList />
       {index !== null ? <ButtonEditor /> : <ScreenEditor />}

@@ -1,5 +1,7 @@
 import { create } from 'zustand';
-import type { PdtdButton, Product, Project, ProjectScreen, ViewMode } from './types';
+import type { PdtdButton, ProfileId, Product, Project, ProjectScreen, ViewMode } from './types';
+import { profileForProject } from './lib/profiles';
+import { convertProjectProfile } from './lib/convert';
 import {
   clone,
   createProject,
@@ -18,6 +20,7 @@ import {
 
 interface EditorState {
   project: Project | null;
+  previewProject: Project | null;
   history: Project[];
   future: Project[];
   view: ViewMode;
@@ -34,7 +37,10 @@ interface EditorState {
   setMessage: (message: string | null) => void;
   setTemplateOpen: (open: boolean) => void;
   setProductsOpen: (open: boolean) => void;
-  newProject: () => void;
+  newProject: (profileId?: ProfileId) => void;
+  previewProfile: (profileId: ProfileId) => void;
+  applyPreview: () => void;
+  cancelPreview: () => void;
   importText: (text: string, fileName: string) => void;
   loadLocal: () => void;
   saveLocal: () => void;
@@ -79,6 +85,7 @@ function pushHistory(state: EditorState, project: Project): Pick<EditorState, 'h
 
 export const useEditor = create<EditorState>((set, get) => ({
   project: null,
+  previewProject: null,
   history: [],
   future: [],
   view: 'editor',
@@ -97,14 +104,47 @@ export const useEditor = create<EditorState>((set, get) => ({
   setTemplateOpen: (templateOpen) => set({ templateOpen }),
   setProductsOpen: (productsOpen) => set({ productsOpen }),
 
-  newProject: () =>
+  newProject: (profileId = '1280') =>
     set({
-      project: createProject(),
+      project: createProject(undefined, profileId),
+      previewProject: null,
       history: [],
       future: [],
       view: 'editor',
-      message: 'Proyecto nuevo creado.',
+      message: `Proyecto ${profileId === '1080' ? '1080' : '1280'} creado.`,
     }),
+
+  previewProfile: (profileId) => {
+    const source = get().project;
+    if (!source) return;
+    if (profileForProject(source).id === profileId) {
+      set({ previewProject: null, message: 'Vista previa cancelada.' });
+      return;
+    }
+    const previewProject = convertProjectProfile(source, profileId);
+    set({
+      previewProject,
+      view: 'caja',
+      message: `Vista previa ${profileId === '1080' ? '1080' : '1280'}; a?n no est? aplicada.`,
+    });
+  },
+
+  applyPreview: () => {
+    const state = get();
+    if (!state.project || !state.previewProject) return;
+    set({
+      ...pushHistory(state, state.project),
+      project: state.previewProject,
+      previewProject: null,
+      view: 'caja',
+      message: 'Dise?o convertido al nuevo plano.',
+    });
+  },
+
+  cancelPreview: () => {
+    if (!get().previewProject) return;
+    set({ previewProject: null, view: 'editor', message: 'Vista previa cancelada.' });
+  },
 
   importText: (text, fileName) =>
     set((state) => {
@@ -112,6 +152,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         const project = importProjectText(text, fileName);
         return {
           project,
+          previewProject: null,
           history: [],
           future: [],
           view: 'editor',
@@ -152,6 +193,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
     set({
       project,
+      previewProject: null,
       history: [],
       future: [],
       view: 'editor',
@@ -183,6 +225,15 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   selectScreen: (screenUid) =>
     set((state) => {
+      if (state.previewProject) {
+        return {
+          previewProject: {
+            ...state.previewProject,
+            selectedScreenUid: screenUid,
+            selectedButtonIndex: null,
+          },
+        };
+      }
       if (!state.project) return state;
       const project = { ...state.project, selectedScreenUid: screenUid, selectedButtonIndex: null };
       return { project };
@@ -190,6 +241,9 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   selectButton: (index) =>
     set((state) => {
+      if (state.previewProject) {
+        return { previewProject: { ...state.previewProject, selectedButtonIndex: index } };
+      }
       if (!state.project) return state;
       return { project: { ...state.project, selectedButtonIndex: index } };
     }),
@@ -246,7 +300,12 @@ export const useEditor = create<EditorState>((set, get) => ({
     const project = get().project;
     if (!project) return;
     const index = nextScreenIndex(project);
-    const compact = makeScreenFromTemplate(template, index, title || `PANTALLA ${index}`);
+    const compact = makeScreenFromTemplate(
+      template,
+      index,
+      title || `PANTALLA ${index}`,
+      profileForProject(project),
+    );
     const screen: ProjectScreen = { uid: uid('screen'), compact };
     const next = clone(project);
     next.screens.push(screen);
@@ -368,7 +427,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   undo: () =>
     set((state) => {
-      if (!state.project || !state.history.length) return state;
+      if (!state.project || !state.history.length || state.previewProject) return state;
       const previous = state.history[state.history.length - 1];
       return {
         project: clone(previous),
@@ -379,7 +438,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   redo: () =>
     set((state) => {
-      if (!state.project || !state.future.length) return state;
+      if (!state.project || !state.future.length || state.previewProject) return state;
       const next = state.future[0];
       return {
         project: clone(next),
@@ -389,6 +448,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     }),
 
   exportWeb: () => {
+    if (get().previewProject) {
+      set({ message: 'Convierte la vista previa antes de exportar.' });
+      return;
+    }
     const project = get().project;
     if (!project) return;
     downloadJson(webFromProject(project), exportFileName(project, 'web'));
@@ -396,6 +459,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   exportCaja: () => {
+    if (get().previewProject) {
+      set({ message: 'Convierte la vista previa antes de exportar.' });
+      return;
+    }
     const project = get().project;
     if (!project) return;
     downloadJson(cajaFromProject(project), exportFileName(project, 'caja'));

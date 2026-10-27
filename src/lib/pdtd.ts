@@ -1,15 +1,24 @@
 import type {
   Action,
+  DesignProfile,
   Json,
   PdtdButton,
   PdtdScreen,
   Product,
+  ProfileId,
   Project,
   ProjectScreen,
   ValidationIssue,
   WebDesign,
   Zone,
 } from '../types';
+import {
+  PROFILE_1280,
+  profileForId,
+  profileForProject,
+  profileFromCaja,
+  profileFromWeb,
+} from './profiles';
 
 export const VISIBLE_WIDTH = 588;
 export const VISIBLE_HEIGHT = 843;
@@ -105,7 +114,11 @@ export function normalizeZone(input: Partial<Zone> | undefined, width: number, h
   };
 }
 
-export function normalizeScreen(input: Partial<PdtdScreen>, fallbackIndex = 1): PdtdScreen {
+export function normalizeScreen(
+  input: Partial<PdtdScreen>,
+  fallbackIndex = 1,
+  profile: DesignProfile = PROFILE_1280,
+): PdtdScreen {
   const source: any = input ?? {};
   const index = number(source.Index, fallbackIndex);
   return {
@@ -113,14 +126,14 @@ export function normalizeScreen(input: Partial<PdtdScreen>, fallbackIndex = 1): 
     Index: index,
     ScreenId: number(source.ScreenId, 0),
     Id: String(source.Id ?? `Pantalla${index}`),
-    Header: normalizeZone(source.Header, BODY_WIDTH, 0),
-    Body: normalizeZone(source.Body, BODY_WIDTH, BODY_HEIGHT),
-    Footer: normalizeZone(source.Footer, BODY_WIDTH, 0),
+    Header: normalizeZone(source.Header, profile.bodyWidth, 0),
+    Body: normalizeZone(source.Body, profile.bodyWidth, profile.bodyHeight),
+    Footer: normalizeZone(source.Footer, profile.bodyWidth, 0),
   };
 }
 
-export function compactFromWeb(screen: PdtdScreen): PdtdScreen {
-  const normalized = normalizeScreen(screen, screen.Index);
+export function compactFromWeb(screen: PdtdScreen, profile: DesignProfile = PROFILE_1280): PdtdScreen {
+  const normalized = normalizeScreen(screen, screen.Index, profile);
   return {
     Index: normalized.Index,
     ScreenId: normalized.ScreenId,
@@ -162,11 +175,12 @@ export function makeButton(text = 'BOTON', overrides: Partial<PdtdButton> = {}):
   });
 }
 
-export function makeTitle(text = 'NUEVA PANTALLA'): PdtdButton {
+export function makeTitle(text = 'NUEVA PANTALLA', profile: DesignProfile = PROFILE_1280): PdtdButton {
+  const width = Math.min(profile.visibleWidth - 48, profile.id === '1080' ? 760 : 499.8);
   return makeButton(text, {
-    X: 44.1,
+    X: Math.round(((profile.visibleWidth - width) / 2) * 10) / 10,
     Y: 17,
-    Width: 499.8,
+    Width: width,
     Height: 91,
     Text: {
       Text: text,
@@ -182,31 +196,39 @@ export function makeTitle(text = 'NUEVA PANTALLA'): PdtdButton {
   });
 }
 
-export function makeEmptyBody(): Zone {
+export function makeEmptyBody(profile: DesignProfile = PROFILE_1280): Zone {
   return {
     BackColor: '#ffffff',
     Buttons: [],
     Texts: [],
     Images: [],
-    Width: BODY_WIDTH,
-    Height: BODY_HEIGHT,
+    Width: profile.bodyWidth,
+    Height: profile.bodyHeight,
     Panels: [],
   };
 }
 
-export function makeEmptyScreen(index: number, id = `Pantalla${index}`): PdtdScreen {
+export function makeEmptyScreen(
+  index: number,
+  id = `Pantalla${index}`,
+  profile: DesignProfile = PROFILE_1280,
+): PdtdScreen {
   return {
     Index: index,
     ScreenId: 0,
     Id: id,
-    Header: normalizeZone(undefined, BODY_WIDTH, 0),
-    Body: makeEmptyBody(),
-    Footer: normalizeZone(undefined, BODY_WIDTH, 0),
+    Header: normalizeZone(undefined, profile.bodyWidth, 0),
+    Body: makeEmptyBody(profile),
+    Footer: normalizeZone(undefined, profile.bodyWidth, 0),
   };
 }
 
-export function templateButtons(template: TemplateId, title = 'NUEVA PANTALLA'): PdtdButton[] {
-  const buttons: PdtdButton[] = [makeTitle(title)];
+export function templateButtons(
+  template: TemplateId,
+  title = 'NUEVA PANTALLA',
+  profile: DesignProfile = PROFILE_1280,
+): PdtdButton[] {
+  const buttons: PdtdButton[] = [makeTitle(title, profile)];
   if (template === 'blank') return buttons;
   if (template === 'grid3') {
     for (let i = 0; i < 9; i += 1) {
@@ -258,21 +280,40 @@ export function templateButtons(template: TemplateId, title = 'NUEVA PANTALLA'):
       );
     }
   }
+  if (profile.id !== '1280' && buttons.length > 1) {
+    const rest = buttons.slice(1);
+    const minX = Math.min(...rest.map((button) => Number(button.X)));
+    const maxX = Math.max(...rest.map((button) => Number(button.X) + Number(button.Width)));
+    const shift = Math.round((profile.visibleWidth - (maxX - minX)) / 2 - minX);
+    rest.forEach((button) => {
+      button.X = Number(button.X) + shift;
+    });
+  }
   return buttons;
 }
 
-export function makeScreenFromTemplate(template: TemplateId, index: number, title: string): PdtdScreen {
-  const screen = makeEmptyScreen(index, `Pantalla${index}`);
-  screen.Body.Buttons = templateButtons(template, title);
+export function makeScreenFromTemplate(
+  template: TemplateId,
+  index: number,
+  title: string,
+  profile: DesignProfile = PROFILE_1280,
+): PdtdScreen {
+  const screen = makeEmptyScreen(index, `Pantalla${index}`, profile);
+  screen.Body.Buttons = templateButtons(template, title, profile);
   return screen;
 }
 
-export function createProject(name = 'Diseno 1280'): Project {
-  const screen = makeScreenFromTemplate('blank', 1, 'MENU PRINCIPAL');
+export function createProject(
+  name?: string,
+  profileId: ProfileId = '1280',
+): Project {
+  const profile = profileForId(profileId);
+  const screen = makeScreenFromTemplate('blank', 1, 'MENU PRINCIPAL', profile);
   screen.Id = 'MenuPpal';
   const projectScreen: ProjectScreen = { uid: uid('screen'), compact: screen };
   return {
-    name,
+    name: name ?? profile.defaultName,
+    profileId: profile.id,
     source: 'new',
     webBase: null,
     screens: [projectScreen],
@@ -282,15 +323,23 @@ export function createProject(name = 'Diseno 1280'): Project {
   };
 }
 
-function projectScreenFromCompact(compact: PdtdScreen, webRaw?: PdtdScreen): ProjectScreen {
-  return { uid: uid('screen'), compact: normalizeScreen(compact, compact.Index), webRaw };
+function projectScreenFromCompact(
+  compact: PdtdScreen,
+  webRaw?: PdtdScreen,
+  profile: DesignProfile = PROFILE_1280,
+): ProjectScreen {
+  return { uid: uid('screen'), compact: normalizeScreen(compact, compact.Index, profile), webRaw };
 }
 
 export function projectFromCaja(data: Json, fileName: string): Project {
   if (!Array.isArray(data)) throw new Error('El archivo Caja debe contener una lista de pantallas.');
-  const screens = data.map((screen, index) => projectScreenFromCompact(normalizeScreen(screen, index + 1)));
+  const profile = profileForId(profileFromCaja(data));
+  const screens = data.map((screen, index) =>
+    projectScreenFromCompact(normalizeScreen(screen, index + 1, profile), undefined, profile),
+  );
   return {
     name: fileName.replace(/\.pdtd$/i, '').replace(/_Dise?o(?:Web|Caja).*$/i, '').trim() || 'Caja importada',
+    profileId: profile.id,
     source: 'caja',
     webBase: null,
     screens,
@@ -303,12 +352,14 @@ export function projectFromCaja(data: Json, fileName: string): Project {
 export function projectFromWeb(data: WebDesign, fileName: string): Project {
   if (!data || !Array.isArray(data.Screens)) throw new Error('El archivo Web no contiene Screens.');
   const web = clone(data);
+  const profile = profileForId(profileFromWeb(web));
   const screens = web.Screens.map((screen) => {
-    const compact = compactFromWeb(screen);
-    return projectScreenFromCompact(compact, clone(screen));
+    const compact = compactFromWeb(screen, profile);
+    return projectScreenFromCompact(compact, clone(screen), profile);
   });
   return {
     name: String(web.Name || fileName.replace(/\.pdtd$/i, '')),
+    profileId: profile.id,
     source: 'web',
     webBase: web,
     screens,
@@ -564,18 +615,19 @@ function makeWebScreen(
   compact: PdtdScreen,
   screens: PdtdScreen[] = [],
   products: Product[] = [],
+  profile: DesignProfile = PROFILE_1280,
 ): PdtdScreen {
   const screen = clone(compact);
   screen.BodyOriginal = {
-    width: PORTAL_WIDTH,
-    height: PORTAL_HEIGHT,
+    width: profile.portalWidth,
+    height: profile.portalHeight,
     backGroundImage: '',
     backGroundColor: screen.Body.BackColor,
     hasElements: false,
     elements: [],
   };
   screen.HeaderOriginal = {
-    width: PORTAL_WIDTH,
+    width: profile.portalWidth,
     height: 0,
     backGroundImage: '',
     backGroundColor: screen.Header.BackColor,
@@ -583,7 +635,7 @@ function makeWebScreen(
     elements: [],
   };
   screen.FooterOriginal = {
-    width: PORTAL_WIDTH,
+    width: profile.portalWidth,
     height: 0,
     backGroundImage: '',
     backGroundColor: screen.Footer.BackColor,
@@ -595,13 +647,14 @@ function makeWebScreen(
 }
 
 export function webFromProject(project: Project): WebDesign {
+  const profile = profileForProject(project);
   const base: WebDesign = project.webBase
     ? clone(project.webBase)
     : {
-        PkDiseño: 0,
+        "PkDise\u00f1o": 0,
         Name: project.name,
-        ScreenSize: '1280×1024',
-        OriginalScreenSize: '1280x976',
+        ScreenSize: profile.screenSize,
+        OriginalScreenSize: profile.originalScreenSize,
         navigationTypeId: '2',
         Screens: [],
       };
@@ -611,7 +664,7 @@ export function webFromProject(project: Project): WebDesign {
     const compact = clone(projectScreen.compact);
     const screen = projectScreen.webRaw
       ? clone(projectScreen.webRaw)
-      : makeWebScreen(compact, compactScreens, project.products);
+      : makeWebScreen(compact, compactScreens, project.products, profile);
     screen.Index = compact.Index;
     screen.ScreenId = compact.ScreenId;
     screen.Id = compact.Id;
@@ -653,6 +706,7 @@ export function nextScreenIndex(project: Project): number {
 
 export function validateProject(project: Project): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  const profile = profileForProject(project);
   const indexes = new Map<number, string>();
   const ids = new Map<string, string>();
   const indexSet = new Set(project.screens.map((screen) => number(screen.compact.Index)));
@@ -690,7 +744,12 @@ export function validateProject(project: Project): ValidationIssue[] {
       const w = number(button.Width);
       const h = number(button.Height);
       const screenName = compact.Id;
-      if (x < 0 || y < 0 || x + w > VISIBLE_WIDTH + 0.5 || y + h > VISIBLE_HEIGHT + 0.5) {
+      if (
+        x < 0 ||
+        y < 0 ||
+        x + w > profile.visibleWidth + 0.5 ||
+        y + h > profile.visibleHeight + 0.5
+      ) {
         issues.push({
           screenUid: screen.uid,
           screenIndex: compact.Index,

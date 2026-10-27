@@ -93,8 +93,26 @@ export interface ProjectScreen {
   webRaw?: PdtdScreen;
 }
 
+export type ProfileId = '1280' | '1080';
+
+export interface DesignProfile {
+  id: ProfileId;
+  label: string;
+  short: string;
+  defaultName: string;
+  visibleWidth: number;
+  visibleHeight: number;
+  bodyWidth: number;
+  bodyHeight: number;
+  portalWidth: number;
+  portalHeight: number;
+  screenSize: string;
+  originalScreenSize: string;
+}
+
 export interface Project {
   name: string;
+  profileId?: ProfileId;
   source: 'web' | 'caja' | 'new';
   webBase?: WebDesign | null;
   screens: ProjectScreen[];

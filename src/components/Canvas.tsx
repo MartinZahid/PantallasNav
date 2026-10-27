@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PdtdButton } from '../types';
-import { isTitle, VISIBLE_HEIGHT, VISIBLE_WIDTH } from '../lib/pdtd';
+import { isTitle } from '../lib/pdtd';
+import { profileForProject } from '../lib/profiles';
+import type { ActiveSnap, SnapRect } from '../lib/snapping';
+import { snapEdge, snapMove } from '../lib/snapping';
 import { useEditor } from '../store';
 
 type CanvasMode = 'editor' | 'caja' | 'portal';
@@ -13,6 +16,24 @@ interface DragState {
   screenUid: string;
   index: number;
   origin: { x: number; y: number; w: number; h: number };
+  others: SnapRect[];
+}
+
+interface Guides {
+  x: ActiveSnap | null;
+  y: ActiveSnap | null;
+}
+
+function neighborRects(buttons: PdtdButton[], selected: number): SnapRect[] {
+  return buttons
+    .map((button, index) => ({
+      index,
+      x: Number(button.X),
+      y: Number(button.Y),
+      w: Number(button.Width),
+      h: Number(button.Height),
+    }))
+    .filter((item) => item.index !== selected);
 }
 
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
@@ -55,6 +76,7 @@ function ButtonView({
   selected,
   editable,
   mode,
+  magnetic,
   onPointerDown,
   onResizeStart,
   onClick,
@@ -63,6 +85,7 @@ function ButtonView({
   selected: boolean;
   editable: boolean;
   mode: CanvasMode;
+  magnetic: boolean;
   onPointerDown: (event: React.PointerEvent, index: number) => void;
   onResizeStart: (event: React.PointerEvent, dir: string, index: number) => void;
   onClick: (index: number) => void;
@@ -70,7 +93,7 @@ function ButtonView({
   const index = Number(button.__index ?? -1);
   return (
     <div
-      className={`canvas-button ${selected ? 'selected' : ''} ${isTitle(button) ? 'title' : ''}`}
+      className={`canvas-button ${selected ? 'selected' : ''} ${magnetic ? 'magnetic' : ''} ${isTitle(button) ? 'title' : ''}`}
       style={buttonStyle(button, selected, editable)}
       onPointerDown={(event) => {
         if (!editable) return;
@@ -105,6 +128,7 @@ function imageBadge(button: PdtdButton): React.ReactNode {
 
 export function Canvas({ mode }: { mode: CanvasMode }) {
   const project = useEditor((state) => state.project);
+  const previewProject = useEditor((state) => state.previewProject);
   const scale = useEditor((state) => state.scale);
   const snap = useEditor((state) => state.snap);
   const showGrid = useEditor((state) => state.showGrid);
@@ -112,15 +136,20 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
   const updateButton = useEditor((state) => state.updateButton);
   const selectButton = useEditor((state) => state.selectButton);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [guides, setGuides] = useState<Guides>({ x: null, y: null });
   const dragRef = useRef<DragState | null>(null);
+  const activeSnapRef = useRef<Guides>({ x: null, y: null });
   const stageRef = useRef<HTMLDivElement | null>(null);
 
-  const screen = project?.screens.find((item) => item.uid === project.selectedScreenUid);
-  const selectedIndex = project?.selectedButtonIndex ?? null;
+  const displayProject = previewProject ?? project;
+  const screen = displayProject?.screens.find((item) => item.uid === displayProject.selectedScreenUid);
+  const selectedIndex = displayProject?.selectedButtonIndex ?? null;
+  const profile = profileForProject(displayProject);
+  const preview = Boolean(previewProject);
 
   const portal = mode === 'portal';
-  const canvasWidth = portal ? 1181 : VISIBLE_WIDTH;
-  const canvasHeight = portal ? 708 : VISIBLE_HEIGHT;
+  const canvasWidth = portal ? profile.portalWidth : profile.visibleWidth;
+  const canvasHeight = portal ? profile.portalHeight : profile.visibleHeight;
   const fitScale = portal ? scale * 0.9 : scale;
 
   useEffect(() => {
@@ -128,35 +157,87 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
     const move = (event: PointerEvent) => {
       const current = dragRef.current;
       if (!current) return;
+      const scaleFactor = Math.max(0.1, fitScale);
+      const threshold = 10 / scaleFactor;
+      const release = 24 / scaleFactor;
+      const roundValue = (value: number) => (snap ? Math.round(value / 10) * 10 : Math.round(value * 10) / 10);
       const dx = (event.clientX - current.startX) / fitScale;
       const dy = (event.clientY - current.startY) / fitScale;
-      const snapValue = (value: number) => (snap ? Math.round(value / 10) * 10 : Math.round(value * 10) / 10);
+      const originRect: SnapRect = { ...current.origin, index: current.index };
       let x = current.origin.x;
       let y = current.origin.y;
       let w = current.origin.w;
       let h = current.origin.h;
 
       if (current.type === 'move') {
-        x = Math.max(-w + 20, Math.min(VISIBLE_WIDTH - 20, current.origin.x + dx));
-        y = Math.max(-h + 20, Math.min(VISIBLE_HEIGHT - 20, current.origin.y + dy));
-        x = snapValue(x);
-        y = snapValue(y);
+        x = Math.max(-w + 20, Math.min(profile.visibleWidth - 20, current.origin.x + dx));
+        y = Math.max(-h + 20, Math.min(profile.visibleHeight - 20, current.origin.y + dy));
+        const snapX = snapMove(
+          { x, y, w, h, index: current.index },
+          current.others,
+          'x',
+          threshold,
+          release,
+          activeSnapRef.current.x,
+        );
+        const snapY = snapMove(
+          { x, y, w, h, index: current.index },
+          current.others,
+          'y',
+          threshold,
+          release,
+          activeSnapRef.current.y,
+        );
+        x = snapX.active ? snapX.value : roundValue(snapX.value);
+        y = snapY.active ? snapY.value : roundValue(snapY.value);
+        activeSnapRef.current = { x: snapX.active, y: snapY.active };
+        setGuides({ x: snapX.active, y: snapY.active });
       } else {
         const min = 20;
-        if (current.dir.includes('e')) w = Math.max(min, current.origin.w + dx);
-        if (current.dir.includes('s')) h = Math.max(min, current.origin.h + dy);
+        let left = current.origin.x;
+        let top = current.origin.y;
+        let right = current.origin.x + current.origin.w;
+        let bottom = current.origin.y + current.origin.h;
+        let snapX: ReturnType<typeof snapEdge> | null = null;
+        let snapY: ReturnType<typeof snapEdge> | null = null;
+
         if (current.dir.includes('w')) {
-          const nextX = Math.min(current.origin.x + current.origin.w - min, current.origin.x + dx);
-          x = snapValue(nextX);
-          w = current.origin.w + (current.origin.x - x);
+          left = Math.min(right - min, current.origin.x + dx);
+          snapX = snapEdge(left, 'left', originRect, current.others, 'x', threshold, release, activeSnapRef.current.x);
+          left = snapX.active ? snapX.value : roundValue(snapX.value);
+        }
+        if (current.dir.includes('e')) {
+          right = Math.max(left + min, current.origin.x + current.origin.w + dx);
+          snapX = snapEdge(right, 'right', originRect, current.others, 'x', threshold, release, activeSnapRef.current.x);
+          right = snapX.active ? snapX.value : roundValue(snapX.value);
         }
         if (current.dir.includes('n')) {
-          const nextY = Math.min(current.origin.y + current.origin.h - min, current.origin.y + dy);
-          y = snapValue(nextY);
-          h = current.origin.h + (current.origin.y - y);
+          top = Math.min(bottom - min, current.origin.y + dy);
+          snapY = snapEdge(top, 'top', originRect, current.others, 'y', threshold, release, activeSnapRef.current.y);
+          top = snapY.active ? snapY.value : roundValue(snapY.value);
         }
-        if (current.dir.includes('e')) w = snapValue(w);
-        if (current.dir.includes('s')) h = snapValue(h);
+        if (current.dir.includes('s')) {
+          bottom = Math.max(top + min, current.origin.y + current.origin.h + dy);
+          snapY = snapEdge(bottom, 'bottom', originRect, current.others, 'y', threshold, release, activeSnapRef.current.y);
+          bottom = snapY.active ? snapY.value : roundValue(snapY.value);
+        }
+
+        x = left;
+        y = top;
+        w = right - left;
+        h = bottom - top;
+        if (w < min) {
+          if (current.dir.includes('w')) x = right - min;
+          w = min;
+          snapX = null;
+        }
+        if (h < min) {
+          if (current.dir.includes('n')) y = bottom - min;
+          h = min;
+          snapY = null;
+        }
+        activeSnapRef.current = { x: snapX?.active ?? null, y: snapY?.active ?? null };
+        setGuides({ x: snapX?.active ?? null, y: snapY?.active ?? null });
       }
 
       updateButton(current.screenUid, current.index, { X: x, Y: y, Width: w, Height: h }, false);
@@ -164,6 +245,8 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
     const up = () => {
       setDrag(null);
       dragRef.current = null;
+      activeSnapRef.current = { x: null, y: null };
+      setGuides({ x: null, y: null });
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up, { once: true });
@@ -171,7 +254,7 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
-  }, [drag, fitScale, snap, updateButton]);
+  }, [drag, fitScale, snap, updateButton, profile.visibleWidth, profile.visibleHeight]);
 
   const startMove = (event: React.PointerEvent, index: number) => {
     if (!screen) return;
@@ -181,6 +264,8 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
     if (!button) return;
     selectButton(index);
     beginTransaction();
+    activeSnapRef.current = { x: null, y: null };
+    setGuides({ x: null, y: null });
     const state: DragState = {
       type: 'move',
       dir: '',
@@ -189,6 +274,7 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
       screenUid: screen.uid,
       index,
       origin: { x: Number(button.X), y: Number(button.Y), w: Number(button.Width), h: Number(button.Height) },
+      others: neighborRects(screen.compact.Body.Buttons, index),
     };
     dragRef.current = state;
     setDrag(state);
@@ -202,6 +288,8 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
     if (!button) return;
     selectButton(index);
     beginTransaction();
+    activeSnapRef.current = { x: null, y: null };
+    setGuides({ x: null, y: null });
     const state: DragState = {
       type: 'resize',
       dir,
@@ -210,6 +298,7 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
       screenUid: screen.uid,
       index,
       origin: { x: Number(button.X), y: Number(button.Y), w: Number(button.Width), h: Number(button.Height) },
+      others: neighborRects(screen.compact.Body.Buttons, index),
     };
     dragRef.current = state;
     setDrag(state);
@@ -218,13 +307,17 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
   const portalButtons = useMemo(() => {
     if (!screen) return [];
     return screen.compact.Body.Buttons.map((button, index) => {
-      const fx = 1181 / Number(screen.compact.Body.Width || 768);
-      const fy = 708 / Number(screen.compact.Body.Height || 1024);
+      const fx = profile.portalWidth / Number(screen.compact.Body.Width || profile.bodyWidth);
+      const fy = profile.portalHeight / Number(screen.compact.Body.Height || profile.bodyHeight);
       return { button, index, x: Number(button.X) * fx, y: Number(button.Y) * fy, w: Number(button.Width) * fx, h: Number(button.Height) * fy };
     });
-  }, [screen]);
+  }, [screen, profile.bodyWidth, profile.bodyHeight, profile.portalWidth, profile.portalHeight]);
 
-  if (!project || !screen) {
+  const magnetic = new Set<number>();
+  if (guides.x) magnetic.add(guides.x.neighbor);
+  if (guides.y) magnetic.add(guides.y.neighbor);
+
+  if (!displayProject || !screen) {
     return <div className="empty-stage">Importa un archivo Web o Caja para comenzar.</div>;
   }
 
@@ -264,13 +357,22 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
   return (
     <div className="stage-scroll" ref={stageRef}>
       <div className="canvas-caption">
-        <strong>{mode === 'caja' ? 'Caja 1280 · 588×843' : 'Editor 1280 · 588×843'}</strong>
+        <strong>
+          {mode === 'caja' ? 'Caja' : 'Editor'} {profile.short} - {profile.visibleWidth}x{profile.visibleHeight}
+        </strong>
         <span>{mode === 'caja' ? 'Así se ve en el POS.' : 'Arrastra para mover · usa las esquinas para redimensionar · clic en el fondo para deseleccionar.'}</span>
       </div>
-      <div className="canvas-frame" style={{ width: VISIBLE_WIDTH * fitScale, height: VISIBLE_HEIGHT * fitScale }}>
+      <div
+        className="canvas-frame"
+        style={{ width: profile.visibleWidth * fitScale, height: profile.visibleHeight * fitScale }}
+      >
         <div
           className={`screen-surface ${showGrid && mode === 'editor' ? 'with-grid' : ''}`}
-          style={{ width: VISIBLE_WIDTH, height: VISIBLE_HEIGHT, transform: `scale(${fitScale})` }}
+          style={{
+            width: profile.visibleWidth,
+            height: profile.visibleHeight,
+            transform: `scale(${fitScale})`,
+          }}
           onPointerDown={() => {
             if (mode === 'editor') selectButton(null);
           }}
@@ -280,13 +382,20 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
               key={index}
               button={{ ...button, __index: index }}
               selected={mode === 'editor' && selectedIndex === index}
-              editable={mode === 'editor'}
+              editable={mode === 'editor' && !preview}
               mode={mode}
+              magnetic={mode === 'editor' && magnetic.has(index)}
               onPointerDown={startMove}
               onResizeStart={startResize}
               onClick={selectButton}
             />
           ))}
+          {mode === 'editor' && guides.x ? (
+            <div className="snap-guide snap-guide-x" style={{ left: guides.x.guide }} />
+          ) : null}
+          {mode === 'editor' && guides.y ? (
+            <div className="snap-guide snap-guide-y" style={{ top: guides.y.guide }} />
+          ) : null}
           {mode === 'editor' && !screen.compact.Body.Buttons.length ? (
             <div className="blank-hint">
               <div>Pantalla vacía</div>
