@@ -7,6 +7,7 @@ import { TemplatesModal, ProductsModal } from './components/Modals';
 import { ValidationPanel } from './components/ValidationPanel';
 import { useEditor } from './store';
 import { profileForProject } from './lib/profiles';
+import { localStorageFailureMessage, saveLocalProject } from './lib/storage';
 import './App.css';
 
 function App() {
@@ -37,9 +38,11 @@ function App() {
     if (!project) return;
     const timeout = window.setTimeout(() => {
       try {
-        localStorage.setItem('editor-pantallas-1280-project-v1', JSON.stringify(project));
-      } catch {
-        // El guardado manual informa del error.
+        saveLocalProject(project);
+      } catch (error) {
+        useEditor
+          .getState()
+          .setMessage(`No se pudo guardar automáticamente: ${localStorageFailureMessage(error)}.`);
       }
     }, 900);
     return () => window.clearTimeout(timeout);
@@ -82,7 +85,7 @@ function App() {
         state.duplicateButton(screen.uid, index);
         return;
       }
-      if ((event.key === 'Delete' || event.key === 'Backspace') && index !== null) {
+      if (event.key === 'Delete' && index !== null) {
         event.preventDefault();
         state.deleteButton(screen.uid, index);
         return;

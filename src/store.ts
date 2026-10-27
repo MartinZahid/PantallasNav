@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { PdtdButton, ProfileId, Product, Project, ProjectScreen, ViewMode } from './types';
 import { profileForProject } from './lib/profiles';
 import { convertProjectProfile } from './lib/convert';
+import { loadLocalProject, localStorageFailureMessage, saveLocalProject } from './lib/storage';
 import {
   clone,
   createProject,
@@ -70,7 +71,6 @@ interface EditorState {
 
 const HISTORY_LIMIT = 60;
 const NUDGE_WINDOW_MS = 600;
-const LOCAL_KEY = 'editor-pantallas-1280-project-v1';
 
 let nudgeSession: { key: string; at: number } | null = null;
 
@@ -78,6 +78,15 @@ function screenOf(project: Project, screenUid: string): ProjectScreen {
   const screen = project.screens.find((item) => item.uid === screenUid);
   if (!screen) throw new Error('Pantalla no encontrada.');
   return screen;
+}
+
+function screenCopy(project: Project, screenUid: string): { project: Project; screen: ProjectScreen } | null {
+  const at = project.screens.findIndex((item) => item.uid === screenUid);
+  if (at < 0) return null;
+  const screen = clone(project.screens[at]);
+  const screens = project.screens.slice();
+  screens[at] = screen;
+  return { project: { ...project, screens }, screen };
 }
 
 function pushHistory(state: EditorState, project: Project): Pick<EditorState, 'history' | 'future'> {
@@ -171,23 +180,14 @@ export const useEditor = create<EditorState>((set, get) => ({
     const project = get().project;
     if (!project) return;
     try {
-      localStorage.setItem(LOCAL_KEY, JSON.stringify(project));
-      set({ message: 'Guardado localmente en este navegador.' });
-    } catch {
-      set({ message: 'No se pudo guardar: el proyecto es demasiado grande.' });
+      saveLocalProject(project);
+      set({ message: `Guardado localmente en este navegador (${profileForProject(project).id}).` });
+    } catch (error) {
+      set({ message: `No se pudo guardar: ${localStorageFailureMessage(error)}.` });
     }
   },
 
-  projectFromLocal: () => {
-    try {
-      const raw = localStorage.getItem(LOCAL_KEY);
-      if (!raw) return null;
-      const project = JSON.parse(raw) as Project;
-      return project;
-    } catch {
-      return null;
-    }
-  },
+  projectFromLocal: () => loadLocalProject(),
 
   loadLocal: () => {
     const project = get().projectFromLocal();
@@ -264,8 +264,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     set((state) => {
       if (!state.project) return state;
       const project = state.project;
-      const screen = project.screens.find((item) => item.uid === screenUid);
-      const button = screen?.compact.Body.Buttons[index];
+      const copy = screenCopy(project, screenUid);
+      if (!copy) return state;
+      const button = copy.screen.compact.Body.Buttons[index];
       if (!button) return state;
       const key = `${screenUid}:${index}`;
       const now = Date.now();
@@ -278,7 +279,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       button.Y = Number(button.Y) + dy;
       return {
         ...historyPatch,
-        project: { ...project, selectedScreenUid: screenUid, selectedButtonIndex: index },
+        project: { ...copy.project, selectedScreenUid: screenUid, selectedButtonIndex: index },
       };
     }),
 
@@ -286,8 +287,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     set((state) => {
       if (!state.project) return state;
       const project = state.project;
-      const screen = screenOf(project, screenUid);
-      const button = screen.compact.Body.Buttons[index];
+      const copy = screenCopy(project, screenUid);
+      if (!copy) return state;
+      const button = copy.screen.compact.Body.Buttons[index];
       if (!button) return state;
       const historyPatch = record ? pushHistory(state, project) : {};
       if (patch.Text) button.Text = { ...button.Text, ...patch.Text };
@@ -299,7 +301,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (typeof patch.Height === 'number') button.Height = patch.Height;
       return {
         ...historyPatch,
-        project: { ...project, selectedScreenUid: screenUid, selectedButtonIndex: index },
+        project: { ...copy.project, selectedScreenUid: screenUid, selectedButtonIndex: index },
       };
     }),
 
@@ -307,21 +309,23 @@ export const useEditor = create<EditorState>((set, get) => ({
     set((state) => {
       if (!state.project) return state;
       const project = state.project;
-      const screen = screenOf(project, screenUid);
+      const copy = screenCopy(project, screenUid);
+      if (!copy) return state;
       const historyPatch = record ? pushHistory(state, project) : {};
-      if (typeof patch.Index === 'number') screen.compact.Index = patch.Index;
-      if (typeof patch.Id === 'string') screen.compact.Id = patch.Id;
-      return { ...historyPatch, project: { ...project } };
+      if (typeof patch.Index === 'number') copy.screen.compact.Index = patch.Index;
+      if (typeof patch.Id === 'string') copy.screen.compact.Id = patch.Id;
+      return { ...historyPatch, project: copy.project };
     }),
 
   updateBody: (screenUid, patch, record = false) =>
     set((state) => {
       if (!state.project) return state;
       const project = state.project;
-      const screen = screenOf(project, screenUid);
+      const copy = screenCopy(project, screenUid);
+      if (!copy) return state;
       const historyPatch = record ? pushHistory(state, project) : {};
-      if (typeof patch.BackColor === 'string') screen.compact.Body.BackColor = patch.BackColor;
-      return { ...historyPatch, project: { ...project } };
+      if (typeof patch.BackColor === 'string') copy.screen.compact.Body.BackColor = patch.BackColor;
+      return { ...historyPatch, project: copy.project };
     }),
 
   addScreen: (template, title) => {

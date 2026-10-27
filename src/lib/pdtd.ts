@@ -378,6 +378,75 @@ export function importProjectText(text: string, fileName: string): Project {
   throw new Error('Formato .pdtd no reconocido.');
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeProducts(value: unknown): Product[] {
+  if (!Array.isArray(value)) return [];
+  const products: Product[] = [];
+  for (const item of value) {
+    if (!isPlainObject(item)) continue;
+    const raw = item as Partial<Product>;
+    const id = Number(raw.id);
+    if (!Number.isFinite(id) || typeof raw.name !== 'string' || !raw.name.trim()) continue;
+    products.push({
+      id,
+      name: raw.name,
+      code: String(raw.code ?? ''),
+      price: number(raw.price, 0),
+      family: String(raw.family ?? ''),
+      abbreviation: typeof raw.abbreviation === 'string' ? raw.abbreviation : '',
+    });
+  }
+  return products;
+}
+
+export function normalizeProject(input: unknown): Project {
+  if (!isPlainObject(input)) {
+    throw new Error('Proyecto guardado no válido.');
+  }
+  const source = input as Partial<Project> & { screens?: unknown };
+  if (!Array.isArray(source.screens) || source.screens.length === 0) {
+    throw new Error('El proyecto guardado no tiene pantallas.');
+  }
+  const rawScreens = source.screens as unknown[];
+  const profileId: ProfileId =
+    source.profileId === '1080' || source.profileId === '1280'
+      ? source.profileId
+      : profileFromCaja(rawScreens.map((item) => (isPlainObject(item) ? item.compact : undefined)));
+  const profile = profileForId(profileId);
+  const screens: ProjectScreen[] = rawScreens.map((raw, index) => {
+    const item = isPlainObject(raw) ? raw : {};
+    const compact = normalizeScreen(
+      isPlainObject(item.compact) ? (item.compact as Partial<PdtdScreen>) : {},
+      index + 1,
+      profile,
+    );
+    return {
+      uid: typeof item.uid === 'string' && item.uid ? item.uid : uid('screen'),
+      compact,
+      webRaw: isPlainObject(item.webRaw)
+        ? normalizeScreen(item.webRaw as Partial<PdtdScreen>, index + 1, profile)
+        : undefined,
+    };
+  });
+  const selected = screens.find((screen) => screen.uid === source.selectedScreenUid) ?? screens[0];
+  const requestedIndex = typeof source.selectedButtonIndex === 'number' ? source.selectedButtonIndex : null;
+  const selectedButtonIndex =
+    requestedIndex !== null && selected.compact.Body.Buttons[requestedIndex] ? requestedIndex : null;
+  return {
+    name: typeof source.name === 'string' && source.name.trim() ? source.name : profile.defaultName,
+    profileId,
+    source: source.source === 'web' || source.source === 'caja' ? source.source : 'new',
+    webBase: isPlainObject(source.webBase) ? clone(source.webBase as unknown as WebDesign) : null,
+    screens,
+    products: normalizeProducts(source.products),
+    selectedScreenUid: selected.uid,
+    selectedButtonIndex,
+  };
+}
+
 function stripPrivateButtonFields(screen: PdtdScreen): PdtdScreen {
   const clean = clone(screen);
   for (const zone of [clean.Header, clean.Body, clean.Footer]) {
@@ -694,7 +763,7 @@ export function downloadJson(data: Json, filename: string): void {
   link.href = url;
   link.download = filename;
   link.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function fileStem(name: string): string {
