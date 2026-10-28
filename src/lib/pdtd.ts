@@ -19,6 +19,7 @@ import {
   profileFromCaja,
   profileFromWeb,
 } from './profiles';
+import { fontHtml, parseFontStyles, splitAlignment } from './textStyle';
 
 export const VISIBLE_WIDTH = 588;
 export const VISIBLE_HEIGHT = 843;
@@ -413,11 +414,11 @@ export function normalizeProject(input: unknown): Project {
   const rawScreens = source.screens as unknown[];
   for (const raw of rawScreens) {
     if (!isPlainObject(raw)) {
-      throw new Error('El proyecto guardado contiene una pantalla nula o inv?lida.');
+      throw new Error('El proyecto guardado contiene una pantalla nula o inválida.');
     }
     const compact = (raw as Record<string, unknown>).compact;
     if (!isPlainObject(compact) || !isPlainObject((compact as Record<string, unknown>).Body)) {
-      throw new Error('El proyecto guardado contiene una pantalla vac?a.');
+      throw new Error('El proyecto guardado contiene una pantalla vacía.');
     }
   }
   const profileId: ProfileId =
@@ -503,7 +504,8 @@ function labelClass(button: PdtdButton): string {
 function textareaHtml(button: PdtdButton, index: number): string {
   const text = escapeHtml(String(button.Text?.Text ?? ''));
   const font = button.Text?.Font ?? { Family: 'Arial Black', Size: 9, FontStyle: '' };
-  return `<textarea maxlength="50" id="elementLabel${index}" contenteditable="true" class="${labelClass(button)}" style="font-size: ${number(font.Size, 9)}px; text-align: center; color: ${rgb(button.Text?.Color ?? '255,255,255')}; font-weight: bold; font-family: '${escapeHtml(font.Family || 'Arial Black')}';">${text}</textarea>`;
+  const horizontal = splitAlignment(button.Text?.TextAlign).horizontal.toLowerCase();
+  return `<textarea maxlength="50" id="elementLabel${index}" contenteditable="true" class="${labelClass(button)}" style="font-size: ${number(font.Size, 9)}px; text-align: ${horizontal}; color: ${rgb(button.Text?.Color ?? '255,255,255')}; ${fontHtml(font.FontStyle)}; font-family: ${escapeHtml(font.Family || 'Arial Black')};">${text}</textarea>`;
 }
 
 function elementHtml(button: PdtdButton, index: number, x: number, y: number, width: number, height: number): string {
@@ -858,7 +860,9 @@ export function validateProject(project: Project): ValidationIssue[] {
       }
       if (context && button.Text.Text) {
         const font = button.Text.Font ?? { Size: 9, Family: 'Arial Black' };
-        context.font = `${number(font.Size, 9) * 1.333}px "${font.Family || 'Arial Black'}"`;
+        const styles = parseFontStyles(font.FontStyle);
+        const prefix = `${styles.has('Italic') ? 'italic ' : ''}${styles.has('Bold') ? 'bold ' : ''}`;
+        context.font = `${prefix}${number(font.Size, 9) * 1.333}px ${font.Family || 'Arial Black'}`;
         const width = context.measureText(button.Text.Text).width;
         if (width > Math.max(20, w - 8)) {
           issues.push({

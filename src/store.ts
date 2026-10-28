@@ -22,6 +22,7 @@ import {
 interface EditorState {
   project: Project | null;
   previewProject: Project | null;
+  clipboardButton: PdtdButton | null;
   history: Project[];
   future: Project[];
   view: ViewMode;
@@ -58,6 +59,8 @@ interface EditorState {
   moveScreen: (screenUid: string, direction: -1 | 1) => void;
   addButton: () => void;
   duplicateButton: (screenUid: string, index: number) => void;
+  copyButton: (screenUid: string, index: number) => void;
+  pasteButton: (screenUid: string) => void;
   deleteButton: (screenUid: string, index: number) => void;
   moveButtonLayer: (screenUid: string, index: number, direction: -1 | 1) => void;
   beginTransaction: () => void;
@@ -99,6 +102,7 @@ function pushHistory(state: EditorState, project: Project): Pick<EditorState, 'h
 export const useEditor = create<EditorState>((set, get) => ({
   project: null,
   previewProject: null,
+  clipboardButton: null,
   history: [],
   future: [],
   view: 'editor',
@@ -428,6 +432,38 @@ export const useEditor = create<EditorState>((set, get) => ({
     screen.compact.Body.Buttons.splice(index + 1, 0, button);
     next.selectedButtonIndex = index + 1;
     set({ ...pushHistory(get(), project), project: next, message: 'Botón duplicado.' });
+  },
+
+  copyButton: (screenUid, index) => {
+    const project = get().project;
+    if (!project || get().previewProject) return;
+    const screen = project.screens.find((item) => item.uid === screenUid);
+    const source = screen?.compact.Body.Buttons[index];
+    if (!source) return;
+    set({
+      clipboardButton: clone(source),
+      message: `Botón copiado: ${source.Text.Text || 'sin texto'}.`,
+    });
+  },
+
+  pasteButton: (screenUid) => {
+    const state = get();
+    if (!state.project || state.previewProject || !state.clipboardButton) return;
+    const next = clone(state.project);
+    const screen = next.screens.find((item) => item.uid === screenUid);
+    if (!screen) return;
+    const button = clone(state.clipboardButton);
+    delete button.__index;
+    button.X = Number(button.X) + 10;
+    button.Y = Number(button.Y) + 10;
+    const selected = next.selectedScreenUid === screenUid ? next.selectedButtonIndex : null;
+    const at = selected === null || selected === undefined
+      ? screen.compact.Body.Buttons.length
+      : Math.min(selected + 1, screen.compact.Body.Buttons.length);
+    screen.compact.Body.Buttons.splice(at, 0, button);
+    next.selectedScreenUid = screenUid;
+    next.selectedButtonIndex = at;
+    set({ ...pushHistory(state, state.project), project: next, message: 'Botón pegado.' });
   },
 
   deleteButton: (screenUid, index) => {

@@ -80,6 +80,16 @@ function App() {
         return;
       }
       if (editing) return;
+      if (command && event.key.toLowerCase() === 'c' && index !== null) {
+        event.preventDefault();
+        state.copyButton(screen.uid, index);
+        return;
+      }
+      if (command && event.key.toLowerCase() === 'v' && state.clipboardButton) {
+        event.preventDefault();
+        state.pasteButton(screen.uid);
+        return;
+      }
       if (command && event.key.toLowerCase() === 'd' && index !== null) {
         event.preventDefault();
         state.duplicateButton(screen.uid, index);
@@ -128,7 +138,7 @@ function App() {
         <span className="status-spacer" />
         <span>{screen?.compact.Body.Buttons.length ?? 0} botones</span>
         <span>{displayProject?.products.length ?? 0} productos</span>
-        <span className="status-help">Ctrl+Z / Ctrl+D / Supr · Arrastra y suelta las esquinas</span>
+        <span className="status-help">Ctrl+Z / Ctrl+C / Ctrl+V / Ctrl+D / Supr · Arrastra y suelta las esquinas</span>
       </footer>
       <TemplatesModal />
       <ProductsModal />

@@ -4,6 +4,7 @@ import { isTitle } from '../lib/pdtd';
 import { profileForProject } from '../lib/profiles';
 import type { ActiveSnap, SnapRect } from '../lib/snapping';
 import { snapEdge, snapMove } from '../lib/snapping';
+import { fontCss, splitAlignment } from '../lib/textStyle';
 import { useEditor } from '../store';
 
 type CanvasMode = 'editor' | 'caja' | 'portal';
@@ -43,12 +44,73 @@ function parseFontSize(button: PdtdButton): number {
 }
 
 function alignmentStyle(button: PdtdButton): React.CSSProperties {
-  const align = String(button.Text?.TextAlign ?? 'MiddleCenter');
-  if (align.includes('Bottom')) return { alignItems: 'flex-end', justifyContent: 'center' };
-  if (align.includes('Top')) return { alignItems: 'flex-start', justifyContent: 'center' };
-  if (align.includes('Left')) return { alignItems: 'center', justifyContent: 'flex-start', textAlign: 'left' };
-  if (align.includes('Right')) return { alignItems: 'center', justifyContent: 'flex-end', textAlign: 'right' };
-  return { alignItems: 'center', justifyContent: 'center' };
+  const { vertical, horizontal } = splitAlignment(button.Text?.TextAlign);
+  return {
+    alignItems: vertical === 'Top' ? 'flex-start' : vertical === 'Bottom' ? 'flex-end' : 'center',
+    justifyContent: horizontal === 'Left' ? 'flex-start' : horizontal === 'Right' ? 'flex-end' : 'center',
+    textAlign: horizontal === 'Left' ? 'left' : horizontal === 'Right' ? 'right' : 'center',
+  };
+}
+
+function textAlignment(button: PdtdButton): 'left' | 'right' | 'center' {
+  const { horizontal } = splitAlignment(button.Text?.TextAlign);
+  return horizontal === 'Left' ? 'left' : horizontal === 'Right' ? 'right' : 'center';
+}
+
+function InlineTextEditor({
+  initialValue,
+  textAlign,
+  textStyle,
+  onCommit,
+  onCancel,
+}: {
+  initialValue: string;
+  textAlign: 'left' | 'right' | 'center';
+  textStyle: React.CSSProperties;
+  onCommit: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const finished = useRef(false);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const finish = (save: boolean) => {
+    if (finished.current) return;
+    finished.current = true;
+    if (save) onCommit(value);
+    else onCancel();
+  };
+
+  return (
+    <input
+      ref={inputRef}
+      className="canvas-inline-input"
+      value={value}
+      spellCheck={false}
+      aria-label="Texto del botón"
+      style={{ textAlign, ...textStyle }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onChange={(event) => setValue(event.target.value)}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          finish(true);
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          finish(false);
+        }
+      }}
+      onBlur={() => finish(true)}
+    />
+  );
 }
 
 function buttonStyle(button: PdtdButton, selected: boolean, editable: boolean): React.CSSProperties {
@@ -63,9 +125,10 @@ function buttonStyle(button: PdtdButton, selected: boolean, editable: boolean): 
     backgroundImage: image ? `url(${image.startsWith('data:') ? image : `data:image/png;base64,${image}`})` : undefined,
     backgroundSize: '100% 100%',
     backgroundRepeat: 'no-repeat',
-    fontFamily: `'${button.Text?.Font?.Family || 'Arial Black'}'`,
+    fontFamily: button.Text?.Font?.Family || 'Arial Black',
     fontSize: parseFontSize(button),
-    outline: selected ? '3px solid #38bdf8' : '1px solid rgba(0,0,0,0.16)',
+    ...fontCss(button.Text?.Font?.FontStyle),
+    outline: selected ? '3px solid #f4511e' : '1px solid rgba(0,0,0,0.16)',
     cursor: editable ? 'move' : 'default',
     border: '0',
   };
@@ -75,39 +138,63 @@ function ButtonView({
   button,
   selected,
   editable,
+  editing,
   mode,
   magnetic,
   onPointerDown,
   onResizeStart,
   onClick,
+  onStartEdit,
+  onCommitText,
+  onCancelEdit,
 }: {
   button: PdtdButton;
   selected: boolean;
   editable: boolean;
+  editing: boolean;
   mode: CanvasMode;
   magnetic: boolean;
   onPointerDown: (event: React.PointerEvent, index: number) => void;
   onResizeStart: (event: React.PointerEvent, dir: string, index: number) => void;
   onClick: (index: number) => void;
+  onStartEdit: (index: number) => void;
+  onCommitText: (index: number, value: string) => void;
+  onCancelEdit: () => void;
 }) {
   const index = Number(button.__index ?? -1);
   return (
     <div
-      className={`canvas-button ${selected ? 'selected' : ''} ${magnetic ? 'magnetic' : ''} ${isTitle(button) ? 'title' : ''}`}
+      className={`canvas-button ${selected ? 'selected' : ''} ${editing ? 'editing' : ''} ${magnetic ? 'magnetic' : ''} ${isTitle(button) ? 'title' : ''}`}
       style={buttonStyle(button, selected, editable)}
       onPointerDown={(event) => {
-        if (!editable) return;
+        if (!editable || editing) return;
         onPointerDown(event, index);
       }}
       onClick={(event) => {
         event.stopPropagation();
         if (editable) onClick(index);
       }}
+      onDoubleClick={(event) => {
+        if (!editable) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onStartEdit(index);
+      }}
     >
-      <span className="canvas-label" style={alignmentStyle(button)}>
-        {button.Text?.Text || (editable ? <em>SIN TEXTO</em> : '')}
-      </span>
-      {editable && selected
+      {editing ? (
+        <InlineTextEditor
+          initialValue={button.Text?.Text ?? ''}
+          textAlign={textAlignment(button)}
+          textStyle={fontCss(button.Text?.Font?.FontStyle)}
+          onCommit={(value) => onCommitText(index, value)}
+          onCancel={onCancelEdit}
+        />
+      ) : (
+        <span className="canvas-label" style={{ ...alignmentStyle(button), ...fontCss(button.Text?.Font?.FontStyle) }}>
+          {button.Text?.Text || (editable ? <em>SIN TEXTO</em> : '')}
+        </span>
+      )}
+      {editable && selected && !editing
         ? HANDLES.map((dir) => (
             <span
               key={dir}
@@ -116,7 +203,7 @@ function ButtonView({
             />
           ))
         : null}
-      {editable ? <span className="button-index">{index + 1}</span> : null}
+      {editable && !editing ? <span className="button-index">{index + 1}</span> : null}
       {mode === 'editor' && imageBadge(button)}
     </div>
   );
@@ -137,9 +224,11 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
   const selectButton = useEditor((state) => state.selectButton);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [guides, setGuides] = useState<Guides>({ x: null, y: null });
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const activeSnapRef = useRef<Guides>({ x: null, y: null });
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const lastPointerDownRef = useRef<{ index: number; at: number } | null>(null);
 
   const displayProject = previewProject ?? project;
   const screen = displayProject?.screens.find((item) => item.uid === displayProject.selectedScreenUid);
@@ -258,8 +347,19 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
 
   const startMove = (event: React.PointerEvent, index: number) => {
     if (!screen) return;
+    if (editingIndex !== null) {
+      if (editingIndex !== index) (document.activeElement as HTMLElement | null)?.blur();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
+    const now = Date.now();
+    const previous = lastPointerDownRef.current;
+    lastPointerDownRef.current = { index, at: now };
+    if (previous && previous.index === index && now - previous.at < 400) {
+      selectButton(index);
+      return;
+    }
     const button = screen.compact.Body.Buttons[index];
     if (!button) return;
     selectButton(index);
@@ -304,6 +404,26 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
     setDrag(state);
   };
 
+  const startEdit = (index: number) => {
+    if (mode !== 'editor' || preview || !screen) return;
+    const previous = lastPointerDownRef.current;
+    if (!previous || previous.index !== index || Date.now() - previous.at > 400) beginTransaction();
+    selectButton(index);
+    setEditingIndex(index);
+  };
+
+  const commitText = (index: number, value: string) => {
+    setEditingIndex(null);
+    if (!screen) return;
+    const button = screen.compact.Body.Buttons[index];
+    if (!button) return;
+    const text = value.trim();
+    if ((button.Text?.Text ?? '') === text) return;
+    updateButton(screen.uid, index, { Text: { ...button.Text, Text: text } }, false);
+  };
+
+  const cancelEdit = () => setEditingIndex(null);
+
   const portalButtons = useMemo(() => {
     if (!screen) return [];
     return screen.compact.Body.Buttons.map((button, index) => {
@@ -341,11 +461,12 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
                   height: h,
                   backgroundColor: `rgb(${button.Text?.BackColor ?? '0,0,0'})`,
                   color: `rgb(${button.Text?.Color ?? '255,255,255'})`,
-                  fontFamily: `'${button.Text?.Font?.Family || 'Arial Black'}'`,
+                  fontFamily: button.Text?.Font?.Family || 'Arial Black',
                   fontSize: Math.max(7, Number(button.Text?.Font?.Size ?? 9) * 1.33),
+                  ...fontCss(button.Text?.Font?.FontStyle),
                 }}
               >
-                <span>{button.Text?.Text}</span>
+                <span style={fontCss(button.Text?.Font?.FontStyle)}>{button.Text?.Text}</span>
               </div>
             ))}
           </div>
@@ -360,7 +481,7 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
         <strong>
           {mode === 'caja' ? 'Caja' : 'Editor'} {profile.short} - {profile.visibleWidth}x{profile.visibleHeight}
         </strong>
-        <span>{mode === 'caja' ? 'Así se ve en el POS.' : 'Arrastra para mover · usa las esquinas para redimensionar · clic en el fondo para deseleccionar.'}</span>
+        <span>{mode === 'caja' ? 'Así se ve en el POS.' : 'Doble clic en un botón para escribir · arrastra para mover · usa las esquinas para redimensionar · clic en el fondo para deseleccionar.'}</span>
       </div>
       <div
         className="canvas-frame"
@@ -374,6 +495,7 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
             transform: `scale(${fitScale})`,
           }}
           onPointerDown={() => {
+            if (editingIndex !== null) (document.activeElement as HTMLElement | null)?.blur();
             if (mode === 'editor') selectButton(null);
           }}
         >
@@ -383,11 +505,15 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
               button={{ ...button, __index: index }}
               selected={mode === 'editor' && selectedIndex === index}
               editable={mode === 'editor' && !preview}
+              editing={mode === 'editor' && !preview && editingIndex === index}
               mode={mode}
               magnetic={mode === 'editor' && magnetic.has(index)}
               onPointerDown={startMove}
               onResizeStart={startResize}
               onClick={selectButton}
+              onStartEdit={startEdit}
+              onCommitText={commitText}
+              onCancelEdit={cancelEdit}
             />
           ))}
           {mode === 'editor' && guides.x ? (

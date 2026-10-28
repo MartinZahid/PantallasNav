@@ -3,26 +3,73 @@ import type { Action, PdtdButton, Product } from '../types';
 import { ACTION_TYPES } from '../lib/pdtd';
 import { useEditor } from '../store';
 
-function defaultValue(type: string, products: Product[], screens: { Index: number }[]): string | number {
+const AVAILABLE_ORDER = [
+  'addProduct',
+  'addToList',
+  'selectProduct',
+  'gotoScreen',
+  'popUp',
+  'listFlush',
+  'finish',
+  'reset',
+  'rewind',
+  'deselectProduct',
+];
+
+const BOOLEAN_ACTIONS = new Set([
+  'selectProduct',
+  'deselectProduct',
+  'listFlush',
+  'finish',
+  'reset',
+  'rewind',
+]);
+
+function isMarker(action: Action): boolean {
+  return String(action.Type) === 'executionOrder';
+}
+
+function actionOrder(action: Action, at: number): number {
+  const value = Number(action.Index);
+  return Number.isFinite(value) && value > 0 ? value : at + 1;
+}
+
+function sortActions(actions: Action[]): Action[] {
+  return actions
+    .map((action, at) => ({ action, at, order: actionOrder(action, at) }))
+    .sort((left, right) => left.order - right.order || left.at - right.at)
+    .map((entry) => entry.action);
+}
+
+function nextOrder(actions: Action[]): number {
+  return actions.reduce((max, action, at) => Math.max(max, actionOrder(action, at)), 0) + 1;
+}
+
+function isTrue(value: unknown): boolean {
+  return value === true || value === 1 || value === 'true' || value === '1';
+}
+
+function defaultValue(type: string, products: Product[], screens: { Index: number }[]): string | number | boolean {
   if (type === 'addProduct' || type === 'addToList') return products[0]?.id ?? 0;
   if (type === 'gotoScreen') return screens[0]?.Index ?? 1;
-  if (type === 'popUp' || type === 'listFlush') return '';
+  if (BOOLEAN_ACTIONS.has(type)) return true;
+  if (type === 'popUp') return '';
   return 0;
 }
 
 function actionLabel(type: string): string {
   const labels: Record<string, string> = {
     addProduct: 'Agregar producto',
-    gotoScreen: 'Ir a pantalla',
+    addToList: 'Agregar producto a lista',
     selectProduct: 'Seleccionar producto',
-    addToList: 'Agregar a lista',
-    executionOrder: 'Fin de secuencia (marcador)',
+    deselectProduct: 'Deseleccionar productos',
+    gotoScreen: 'Ir a pantalla',
+    listFlush: 'Limpiar lista de productos',
     finish: 'Terminar',
     reset: 'Reiniciar',
-    deselectProduct: 'Deseleccionar producto',
     rewind: 'Retroceder',
     popUp: 'Ventana / popup',
-    listFlush: 'Vaciar lista',
+    executionOrder: 'Fin de secuencia',
   };
   return labels[type] ?? type;
 }
@@ -39,12 +86,11 @@ function ProductPicker({
   onFocus: () => void;
 }) {
   const selected = products.find((product) => product.id === Number(value));
-  const selectedLabel = selected ? `${selected.id} ? ${selected.name}` : '';
+  const selectedLabel = selected ? `${selected.id} · ${selected.name}` : '';
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const wrapper = useRef<HTMLDivElement>(null);
-
 
   useEffect(() => {
     if (!open) return;
@@ -81,7 +127,7 @@ function ProductPicker({
       <input
         type="search"
         value={open ? query : selectedLabel}
-        placeholder="Buscar producto por nombre, c?digo o ID?"
+        placeholder="Buscar producto por nombre, código o ID…"
         onFocus={(event) => {
           onFocus();
           setQuery(selectedLabel);
@@ -148,24 +194,43 @@ export function ActionsEditor({
   const project = useEditor((state) => state.project);
   const updateButton = useEditor((state) => state.updateButton);
   const beginTransaction = useEditor((state) => state.beginTransaction);
+  const [menu, setMenu] = useState<number | null>(null);
+
+  const rawActions = useMemo(() => button.Actions ?? [], [button.Actions]);
+  const markers = useMemo(() => rawActions.filter(isMarker), [rawActions]);
+  const actions = useMemo(() => sortActions(rawActions.filter((action) => !isMarker(action))), [rawActions]);
+  const products = project?.products ?? [];
+  const screens = project?.screens.map((screen) => screen.compact) ?? [];
+
+  useEffect(() => {
+    if (menu === null) return;
+    const close = (event: MouseEvent) => {
+      if (!(event.target as HTMLElement).closest('.function-menu')) setMenu(null);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [menu]);
+
   if (!project) return null;
-  const actions = button.Actions ?? [];
-  const products = project.products;
-  const screens = project.screens.map((screen) => screen.compact);
+
+  const usedTypes = new Set(rawActions.map((action) => String(action.Type)));
+  const available = AVAILABLE_ORDER.filter((type) => !usedTypes.has(type) && ACTION_TYPES.includes(type as (typeof ACTION_TYPES)[number]));
 
   const setActions = (next: Action[], record = false) => {
-    updateButton(screenUid, index, { Actions: next.map((action, at) => ({ ...action, Index: at + 1 })) }, record);
+    updateButton(screenUid, index, { Actions: [...sortActions(next), ...markers] }, record);
   };
 
-  const add = () => {
+  const add = (type: string) => {
+    if (usedTypes.has(type)) return;
     beginTransaction();
-    const type = 'addProduct';
-    setActions([...actions, { Index: actions.length + 1, Type: type, Value: defaultValue(type, products, screens) }], false);
+    setActions([...actions, { Index: nextOrder(actions), Type: type, Value: defaultValue(type, products, screens) }], false);
+    setMenu(null);
   };
 
   const remove = (at: number) => {
     beginTransaction();
     setActions(actions.filter((_, position) => position !== at), false);
+    setMenu(null);
   };
 
   const move = (at: number, direction: -1 | 1) => {
@@ -173,112 +238,148 @@ export function ActionsEditor({
     if (to < 0 || to >= actions.length) return;
     beginTransaction();
     const next = [...actions];
-    const [item] = next.splice(at, 1);
-    next.splice(to, 0, item);
-    setActions(next, false);
+    const left = next[at];
+    const right = next[to];
+    const leftOrder = actionOrder(left, at);
+    const rightOrder = actionOrder(right, to);
+    next[at] = { ...left, Index: rightOrder };
+    next[to] = { ...right, Index: leftOrder };
+    setActions(leftOrder === rightOrder ? next.map((action, position) => ({ ...action, Index: position + 1 })) : next, false);
+    setMenu(null);
   };
 
-  const changeType = (at: number, type: string) => {
-    beginTransaction();
-    const next = actions.map((action, position) =>
-      position === at ? { ...action, Type: type, Value: defaultValue(type, products, screens) } : action,
+  const changeValue = (at: number, value: string | number | boolean) => {
+    setActions(
+      actions.map((action, position) => (position === at ? { ...action, Value: value } : action)),
+      false,
     );
-    setActions(next, false);
   };
 
-  const changeValue = (at: number, value: string | number) => {
-    const next = actions.map((action, position) =>
-      position === at ? { ...action, Value: value } : action,
+  const valueControl = (action: Action, at: number) => {
+    const type = String(action.Type);
+    if (type === 'addProduct' || type === 'addToList') {
+      return products.length ? (
+        <ProductPicker
+          value={action.Value ?? 0}
+          products={products}
+          onFocus={beginTransaction}
+          onChange={(productId) => changeValue(at, productId)}
+        />
+      ) : (
+        <input
+          type="number"
+          value={String(action.Value ?? 0)}
+          onFocus={beginTransaction}
+          onChange={(event) => changeValue(at, Number(event.target.value))}
+          placeholder="ID producto"
+        />
+      );
+    }
+    if (type === 'gotoScreen') {
+      const value = String(action.Value ?? '');
+      const known = screens.some((screen) => String(screen.Index) === value);
+      return (
+        <select value={value} onFocus={beginTransaction} onChange={(event) => changeValue(at, Number(event.target.value))}>
+          {!known ? <option value="">Selecciona pantalla</option> : null}
+          {screens.map((screen) => (
+            <option key={screen.Index} value={screen.Index}>
+              {screen.Index} · {screen.Id}
+            </option>
+          ))}
+        </select>
+      );
+    }
+    if (BOOLEAN_ACTIONS.has(type)) {
+      const active = isTrue(action.Value);
+      return (
+        <label className="function-toggle">
+          <input
+            type="checkbox"
+            checked={active}
+            onFocus={beginTransaction}
+            onChange={(event) => changeValue(at, event.target.checked)}
+          />
+          <span>{active ? 'Sí' : 'No'}</span>
+        </label>
+      );
+    }
+    return (
+      <input
+        value={String(action.Value ?? '')}
+        onFocus={beginTransaction}
+        onChange={(event) => changeValue(at, event.target.value)}
+        placeholder="Valor"
+      />
     );
-    setActions(next, false);
   };
-
-  const hasMarker = actions.some((action) => action.Type === 'executionOrder');
 
   return (
     <div className="actions-editor">
-      <div className="field-heading">
-        <span>Acciones</span>
-        <button type="button" className="small-button" onClick={add}>+ Acción</button>
+      <div className="functions-block">
+        <div className="functions-title">Funciones Actuales</div>
+        <div className="functions-card">
+          {actions.length ? (
+            actions.map((action, at) => {
+              const type = String(action.Type);
+              const label = actionLabel(type);
+              return (
+                <div className="function-row" key={`${type}-${actionOrder(action, at)}-${at}`}>
+                  <div className="function-main">
+                    <span className="function-name">{label}</span>
+                    <div className="function-control">{valueControl(action, at)}</div>
+                  </div>
+                  <span className="function-order" title="Orden de ejecución">
+                    {actionOrder(action, at)}
+                  </span>
+                  <div className="function-menu">
+                    <button
+                      type="button"
+                      className="function-menu-button"
+                      title={`Opciones de ${label}`}
+                      aria-label={`Opciones de ${label}`}
+                      onClick={() => setMenu(menu === at ? null : at)}
+                    >
+                      ⋮
+                    </button>
+                    {menu === at ? (
+                      <div className="function-menu-popover">
+                        <button type="button" disabled={at === 0} onClick={() => move(at, -1)}>
+                          Subir
+                        </button>
+                        <button type="button" disabled={at === actions.length - 1} onClick={() => move(at, 1)}>
+                          Bajar
+                        </button>
+                        <button type="button" className="danger" onClick={() => remove(at)}>
+                          Eliminar
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <p className="functions-empty">Este botón todavía no tiene funciones.</p>
+          )}
+        </div>
+        <p className="functions-help">Las funciones se ejecutan de arriba hacia abajo.</p>
       </div>
-      {actions.length === 0 ? <p className="muted small">Sin acciones. Este botón solo muestra contenido o es un título.</p> : null}
-      <div className="action-list">
-        {actions.map((action, at) => {
-          const type = String(action.Type);
-          return (
-            <div className={`action-row ${type === 'executionOrder' ? 'marker-row' : ''}`} key={`${at}-${type}`}>
-              <span className="action-order">{at + 1}</span>
-              <div className="action-fields">
-                <select
-                  value={type}
-                  onFocus={beginTransaction}
-                  onChange={(event) => changeType(at, event.target.value)}
-                >
-                  {ACTION_TYPES.map((item) => (
-                    <option value={item} key={item}>{actionLabel(item)}</option>
-                  ))}
-                  {!ACTION_TYPES.includes(type as (typeof ACTION_TYPES)[number]) ? (
-                    <option value={type}>{type}</option>
-                  ) : null}
-                </select>
-                {type === 'addProduct' || type === 'addToList' ? (
-                  products.length ? (
-                    <ProductPicker
-                      value={action.Value ?? 0}
-                      products={products}
-                      onFocus={beginTransaction}
-                      onChange={(productId) => changeValue(at, productId)}
-                    />
-                  ) : (
-                    <input
-                      type="number"
-                      value={String(action.Value ?? 0)}
-                      onFocus={beginTransaction}
-                      onChange={(event) => changeValue(at, Number(event.target.value))}
-                      placeholder="ID producto"
-                    />
-                  )
-                ) : type === 'gotoScreen' ? (
-                  <select
-                    value={String(action.Value ?? '')}
-                    onFocus={beginTransaction}
-                    onChange={(event) => changeValue(at, Number(event.target.value))}
-                  >
-                    {screens.map((screen) => (
-                      <option key={screen.Index} value={screen.Index}>
-                        {screen.Index} · {screen.Id}
-                      </option>
-                    ))}
-                  </select>
-                ) : type === 'executionOrder' ? (
-                  <div className="action-note">Marca el final de la secuencia. No agrega productos ni navega.</div>
-                ) : type === 'popUp' || type === 'listFlush' ? (
-                  <input
-                    value={String(action.Value ?? '')}
-                    onFocus={beginTransaction}
-                    onChange={(event) => changeValue(at, event.target.value)}
-                    placeholder="Valor"
-                  />
-                ) : (
-                  <input
-                    type="number"
-                    value={String(action.Value ?? 0)}
-                    onFocus={beginTransaction}
-                    onChange={(event) => changeValue(at, Number(event.target.value))}
-                    placeholder="Valor"
-                  />
-                )}
-              </div>
-              <div className="action-buttons">
-                <button type="button" title="Subir" onClick={() => move(at, -1)}>↑</button>
-                <button type="button" title="Bajar" onClick={() => move(at, 1)}>↓</button>
-                <button type="button" title="Eliminar" onClick={() => remove(at)}>×</button>
-              </div>
-            </div>
-          );
-        })}
+
+      <div className="functions-block">
+        <div className="functions-title">Funciones Disponibles</div>
+        <div className="available-list">
+          {available.length ? (
+            available.map((type) => (
+              <button type="button" className="available-function" key={type} onClick={() => add(type)}>
+                <span>{actionLabel(type)}</span>
+                <span aria-hidden="true">+</span>
+              </button>
+            ))
+          ) : (
+            <p className="functions-empty">Ya agregaste todas las funciones disponibles.</p>
+          )}
+        </div>
       </div>
-      {hasMarker ? <p className="action-help">“Fin de secuencia” es solo un marcador del portal: no ejecuta nada en la caja. Debe quedar al final del botón.</p> : null}
     </div>
   );
 }

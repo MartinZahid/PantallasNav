@@ -10,9 +10,9 @@ body,
 }
 
 body {
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background: #0d1117;
-  color: #e6edf3;
+  font-family: 'Roboto', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #eef0f2;
+  color: #3f4b55;
   overflow: hidden;
 }
 
@@ -28,24 +28,6 @@ button {
 }
 
 button:disabled {
-  opacity: 0.35;
+  opacity: 0.45;
   cursor: not-allowed;
-}
-
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #2a3442;
-  border-radius: 8px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #3a4758;
 }

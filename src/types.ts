@@ -1,7 +1,7 @@
 export type Json = any;
 
 export interface Action {
-  Index: number;
+  Index?: number;
   Type: string;
   Value: Json;
 }
