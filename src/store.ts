@@ -53,6 +53,10 @@ interface EditorState {
   updateButton: (screenUid: string, index: number, patch: Partial<PdtdButton>, record?: boolean) => void;
   updateScreen: (screenUid: string, patch: { Id?: string; Index?: number }, record?: boolean) => void;
   updateBody: (screenUid: string, patch: { BackColor?: string }, record?: boolean) => void;
+  applyProjectChange: (
+    next: Project,
+    options?: { message?: string; selectedScreenUid?: string; selectedButtonIndex?: number | null },
+  ) => void;
   addScreen: (template: TemplateId, title: string) => void;
   duplicateScreen: (screenUid: string) => void;
   deleteScreen: (screenUid: string) => void;
@@ -330,6 +334,36 @@ export const useEditor = create<EditorState>((set, get) => ({
       const historyPatch = record ? pushHistory(state, project) : {};
       if (typeof patch.BackColor === 'string') copy.screen.compact.Body.BackColor = patch.BackColor;
       return { ...historyPatch, project: copy.project };
+    }),
+
+  applyProjectChange: (next, options = {}) =>
+    set((state) => {
+      if (!state.project || state.previewProject) return state;
+      const project = clone(next);
+      const selectedScreenUid =
+        options.selectedScreenUid ??
+        project.screens.find((screen) => screen.uid === project.selectedScreenUid)?.uid ??
+        project.screens[0]?.uid ??
+        null;
+      const selectedScreen = project.screens.find((screen) => screen.uid === selectedScreenUid);
+      const requestedIndex = options.selectedButtonIndex;
+      const selectedButtonIndex =
+        requestedIndex === null
+          ? null
+          : typeof requestedIndex === 'number' && selectedScreen
+            ? Math.max(0, Math.min(requestedIndex, selectedScreen.compact.Body.Buttons.length - 1))
+            : selectedScreen
+              ? 0
+              : null;
+      project.selectedScreenUid = selectedScreenUid;
+      project.selectedButtonIndex = selectedButtonIndex;
+      return {
+        ...pushHistory(state, state.project),
+        project,
+        previewProject: null,
+        view: 'editor',
+        message: options.message ?? 'Cambios aplicados.',
+      };
     }),
 
   addScreen: (template, title) => {

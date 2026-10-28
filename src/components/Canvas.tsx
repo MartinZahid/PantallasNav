@@ -113,7 +113,16 @@ function InlineTextEditor({
   );
 }
 
-function buttonStyle(button: PdtdButton, selected: boolean, editable: boolean): React.CSSProperties {
+function gotoScreenTarget(button: PdtdButton): number | null {
+  const actions = (button.Actions ?? [])
+    .filter((action) => String(action.Type) === 'gotoScreen')
+    .map((action, at) => ({ action, order: Number(action.Index) || at + 1 }))
+    .sort((left, right) => left.order - right.order);
+  const value = Number(actions[0]?.action.Value);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function buttonStyle(button: PdtdButton, selected: boolean, editable: boolean, navigable: boolean): React.CSSProperties {
   const image = String(button.Icon?.Imagen ?? '');
   return {
     left: Number(button.X),
@@ -129,7 +138,7 @@ function buttonStyle(button: PdtdButton, selected: boolean, editable: boolean): 
     fontSize: parseFontSize(button),
     ...fontCss(button.Text?.Font?.FontStyle),
     outline: selected ? '3px solid #f4511e' : '1px solid rgba(0,0,0,0.16)',
-    cursor: editable ? 'move' : 'default',
+    cursor: editable ? 'move' : navigable ? 'pointer' : 'default',
     border: '0',
   };
 }
@@ -139,11 +148,14 @@ function ButtonView({
   selected,
   editable,
   editing,
+  navigable,
+  navigationTitle,
   mode,
   magnetic,
   onPointerDown,
   onResizeStart,
   onClick,
+  onActivate,
   onStartEdit,
   onCommitText,
   onCancelEdit,
@@ -152,11 +164,14 @@ function ButtonView({
   selected: boolean;
   editable: boolean;
   editing: boolean;
+  navigable: boolean;
+  navigationTitle?: string;
   mode: CanvasMode;
   magnetic: boolean;
   onPointerDown: (event: React.PointerEvent, index: number) => void;
   onResizeStart: (event: React.PointerEvent, dir: string, index: number) => void;
   onClick: (index: number) => void;
+  onActivate: (index: number) => void;
   onStartEdit: (index: number) => void;
   onCommitText: (index: number, value: string) => void;
   onCancelEdit: () => void;
@@ -164,8 +179,9 @@ function ButtonView({
   const index = Number(button.__index ?? -1);
   return (
     <div
-      className={`canvas-button ${selected ? 'selected' : ''} ${editing ? 'editing' : ''} ${magnetic ? 'magnetic' : ''} ${isTitle(button) ? 'title' : ''}`}
-      style={buttonStyle(button, selected, editable)}
+      className={`canvas-button ${selected ? 'selected' : ''} ${editing ? 'editing' : ''} ${magnetic ? 'magnetic' : ''} ${navigable ? 'navigable' : ''} ${isTitle(button) ? 'title' : ''}`}
+      style={buttonStyle(button, selected, editable, navigable)}
+      title={navigable ? navigationTitle : undefined}
       onPointerDown={(event) => {
         if (!editable || editing) return;
         onPointerDown(event, index);
@@ -173,6 +189,7 @@ function ButtonView({
       onClick={(event) => {
         event.stopPropagation();
         if (editable) onClick(index);
+        else if (navigable && event.detail < 2) onActivate(index);
       }}
       onDoubleClick={(event) => {
         if (!editable) return;
@@ -222,6 +239,8 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
   const beginTransaction = useEditor((state) => state.beginTransaction);
   const updateButton = useEditor((state) => state.updateButton);
   const selectButton = useEditor((state) => state.selectButton);
+  const selectScreen = useEditor((state) => state.selectScreen);
+  const setMessage = useEditor((state) => state.setMessage);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [guides, setGuides] = useState<Guides>({ x: null, y: null });
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -441,6 +460,20 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
     return <div className="empty-stage">Importa un archivo Web o Caja para comenzar.</div>;
   }
 
+  const activateButton = (index: number) => {
+    if (mode !== 'caja') return;
+    const button = screen.compact.Body.Buttons[index];
+    if (!button) return;
+    const targetIndex = gotoScreenTarget(button);
+    if (targetIndex === null) return;
+    const target = displayProject.screens.find((item) => Number(item.compact.Index) === targetIndex);
+    if (!target) {
+      setMessage(`No encontré la pantalla ${targetIndex} en este proyecto.`);
+      return;
+    }
+    selectScreen(target.uid);
+  };
+
   if (mode === 'portal') {
     return (
       <div className="stage-scroll">
@@ -481,7 +514,7 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
         <strong>
           {mode === 'caja' ? 'Caja' : 'Editor'} {profile.short} - {profile.visibleWidth}x{profile.visibleHeight}
         </strong>
-        <span>{mode === 'caja' ? 'Así se ve en el POS.' : 'Doble clic en un botón para escribir · arrastra para mover · usa las esquinas para redimensionar · clic en el fondo para deseleccionar.'}</span>
+        <span>{mode === 'caja' ? 'Así se ve en el POS. Haz clic en un botón con Ir a pantalla para navegar.' : 'Doble clic en un botón para escribir · arrastra para mover · usa las esquinas para redimensionar · clic en el fondo para deseleccionar.'}</span>
       </div>
       <div
         className="canvas-frame"
@@ -499,23 +532,37 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
             if (mode === 'editor') selectButton(null);
           }}
         >
-          {screen.compact.Body.Buttons.map((button, index) => (
-            <ButtonView
-              key={index}
-              button={{ ...button, __index: index }}
-              selected={mode === 'editor' && selectedIndex === index}
-              editable={mode === 'editor' && !preview}
-              editing={mode === 'editor' && !preview && editingIndex === index}
-              mode={mode}
-              magnetic={mode === 'editor' && magnetic.has(index)}
-              onPointerDown={startMove}
-              onResizeStart={startResize}
-              onClick={selectButton}
-              onStartEdit={startEdit}
-              onCommitText={commitText}
-              onCancelEdit={cancelEdit}
-            />
-          ))}
+          {screen.compact.Body.Buttons.map((button, index) => {
+            const targetIndex = mode === 'caja' ? gotoScreenTarget(button) : null;
+            const target = targetIndex === null
+              ? undefined
+              : displayProject.screens.find((item) => Number(item.compact.Index) === targetIndex);
+            const navigationTitle = targetIndex === null
+              ? undefined
+              : target
+                ? `Ir a pantalla ${targetIndex} · ${target.compact.Id}`
+                : `Pantalla ${targetIndex} no encontrada`;
+            return (
+              <ButtonView
+                key={index}
+                button={{ ...button, __index: index }}
+                selected={mode === 'editor' && selectedIndex === index}
+                editable={mode === 'editor' && !preview}
+                editing={mode === 'editor' && !preview && editingIndex === index}
+                navigable={targetIndex !== null}
+                navigationTitle={navigationTitle}
+                mode={mode}
+                magnetic={mode === 'editor' && magnetic.has(index)}
+                onPointerDown={startMove}
+                onResizeStart={startResize}
+                onClick={selectButton}
+                onActivate={activateButton}
+                onStartEdit={startEdit}
+                onCommitText={commitText}
+                onCancelEdit={cancelEdit}
+              />
+            );
+          })}
           {mode === 'editor' && guides.x ? (
             <div className="snap-guide snap-guide-x" style={{ left: guides.x.guide }} />
           ) : null}

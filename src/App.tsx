@@ -5,6 +5,7 @@ import { PropertiesPanel } from './components/PropertiesPanel';
 import { Toolbar } from './components/Toolbar';
 import { TemplatesModal, ProductsModal } from './components/Modals';
 import { ValidationPanel } from './components/ValidationPanel';
+import { AiAssistant } from './components/AiAssistant';
 import { useEditor } from './store';
 import { profileForProject } from './lib/profiles';
 import { localStorageFailureMessage, saveLocalProject } from './lib/storage';
@@ -142,6 +143,7 @@ function App() {
       </footer>
       <TemplatesModal />
       <ProductsModal />
+      <AiAssistant />
     </div>
   );
 }
