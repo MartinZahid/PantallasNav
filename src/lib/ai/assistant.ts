@@ -196,6 +196,9 @@ export async function runAssistant({ project, messages, text, settings, signal, 
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No pude comunicarme con el proveedor de IA.';
-    return { message: errorMessage(message), lab: lab(message) };
+    const hint = /insufficient|quota|funds|billing|accounts/i.test(message)
+      ? ' Revisa el saldo o el plan del proveedor. En OpenCode, si tienes suscripción Go, cambia el plan a Go en Ajustes.'
+      : '';
+    return { message: errorMessage(`${message}${hint}`), lab: lab(message) };
   }
 }

@@ -7,6 +7,11 @@ const proxy = {
     changeOrigin: true,
     rewrite: (path: string) => path.replace(/^\/api\/openai/, '/v1'),
   },
+  '/api/opencode-go': {
+    target: 'https://opencode.ai',
+    changeOrigin: true,
+    rewrite: (path: string) => path.replace(/^\/api\/opencode-go/, '/zen/go/v1'),
+  },
   '/api/opencode': {
     target: 'https://opencode.ai/zen',
     changeOrigin: true,

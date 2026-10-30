@@ -152,7 +152,7 @@ export const AI_PROVIDERS: Record<AiProviderId, { label: string; baseUrl: string
   },
   opencode: {
     label: 'OpenCode Lab',
-    baseUrl: '/api/opencode',
+    baseUrl: '/api/opencode-go',
     model: 'deepseek-v4.1-flash',
   },
 };

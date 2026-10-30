@@ -233,6 +233,9 @@ export async function chatCompletion(
       headers: {
         Authorization: `Bearer ${config.key}`,
         'Content-Type': 'application/json',
+        ...(/\/api\/opencode-go|zen\/go/.test(config.baseUrl)
+          ? { 'x-opencode-session': crypto.randomUUID() }
+          : {}),
       },
       body: JSON.stringify(body),
       signal,

@@ -322,6 +322,22 @@ export function AiAssistant() {
                   placeholder="https://api.openai.com/v1"
                 />
               </label>
+              {provider === 'opencode' ? (
+                <label className="ai-field">
+                  <span>Plan de OpenCode</span>
+                  <select
+                    value={settings.providers[provider].baseUrl.includes('opencode-go') ? 'go' : 'zen'}
+                    onChange={(event) =>
+                      updateProvider({
+                        baseUrl: event.target.value === 'go' ? '/api/opencode-go' : '/api/opencode',
+                      })
+                    }
+                  >
+                    <option value="zen">Zen · créditos prepago</option>
+                    <option value="go">Go · suscripción</option>
+                  </select>
+                </label>
+              ) : null}
               {settings.providers[provider].baseUrl.startsWith('/api/') ? (
                 <p className="ai-hint">Usa el proxy local de Vite. En producción necesitarás un backend.</p>
               ) : null}
