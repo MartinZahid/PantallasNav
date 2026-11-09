@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { validateProject } from '../lib/pdtd';
 import { useEditor } from '../store';
 import { profileForProject } from '../lib/profiles';
+import type { ValidationIssue } from '../types';
 
 export function ValidationPanel() {
   const sourceProject = useEditor((state) => state.project);
@@ -16,9 +17,9 @@ export function ValidationPanel() {
   const errors = issues.filter((issue) => issue.level === 'error');
   const warnings = issues.filter((issue) => issue.level === 'warning');
 
-  const openIssue = (screenUid: string, buttonUid?: string) => {
-    selectScreen(screenUid);
-    selectButton(buttonUid !== undefined ? Number(buttonUid) : null);
+  const openIssue = (issue: ValidationIssue) => {
+    selectScreen(issue.screenUid);
+    selectButton(issue.buttonUid !== undefined ? Number(issue.buttonUid) : null, issue.zone ?? 'Body', issue.kind ?? 'button');
     setView('editor');
   };
 
@@ -43,8 +44,8 @@ export function ValidationPanel() {
         </div>
         <div className="compat-card">
           <span className="compat-kicker">Archivo Web</span>
-          <strong>Proyección para Point</strong>
-          <p>Se genera BodyOriginal con las etiquetas y geometría para que el portal exporte la misma Caja.</p>
+          <strong>{profile.cajaOnly ? 'No disponible en 1024' : 'Proyección para Point'}</strong>
+          <p>{profile.cajaOnly ? 'El plano 1024 × 768 se exporta solo como Caja, con Encabezado, Cuerpo y Pie tal como se importaron.' : 'Se genera BodyOriginal con las etiquetas y geometría para que el portal exporte la misma Caja.'}</p>
         </div>
         <div className="compat-card">
           <span className="compat-kicker">Imágenes</span>
@@ -66,7 +67,7 @@ export function ValidationPanel() {
               type="button"
               className={`issue-row ${issue.level}`}
               key={`${issue.screenUid}-${issue.buttonUid ?? 'screen'}-${index}`}
-              onClick={() => openIssue(issue.screenUid, issue.buttonUid)}
+              onClick={() => openIssue(issue)}
             >
               <span className="issue-level">{issue.level === 'error' ? 'ERROR' : 'AVISO'}</span>
               <span className="issue-main">

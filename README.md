@@ -30,6 +30,7 @@ El proyecto no usa servidor propio. Se puede publicar como sitio est?tico.
 | --- | --- | --- | --- | --- |
 | 1280 ? 1024 | 588 ? 843 | 768 ? 1024 | 1280 ? 1024 | 1181 ? 708 |
 | 1920 ? 1080 | 975 ? 863 | 1152 ? 1080 | 1920 ? 1080 | 1181 ? 713 |
+| 1024 × 768 | 470.4 × 674.4 | 614.4 × 768 (Encabezado + Cuerpo + Pie) | solo Caja | no aplica |
 
 Al cambiar el selector de plano:
 
@@ -38,6 +39,23 @@ Al cambiar el selector de plano:
 3. **Cancelar** vuelve al plano anterior.
 
 La conversi?n reacomoda los botones en cuadr?culas cuadradas dentro del ?rea visible, conserva t?tulos, textos, colores, fuentes, acciones e im?genes, y actualiza las vistas de **Caja** y **Portal**. La exportaci?n queda deshabilitada hasta convertir la vista previa.
+
+### Plano 1024 × 768 (solo Caja)
+
+Al importar una Caja cuyo ancho de zona es 614.4 se detecta el plano **1024 × 768**. Estas pantallas se reparten en tres zonas apiladas:
+
+- **Encabezado**: título de la pantalla (`Header.Texts`) e iconos de regresar / terminar (`Header.Buttons`).
+- **Cuerpo**: los botones de producto y navegación.
+- **Pie**: opcional.
+
+En este plano:
+
+- Los elementos del encabezado se seleccionan, mueven, redimensionan y editan igual que los del cuerpo; sus coordenadas son relativas a su zona.
+- El alto y el fondo del encabezado y del pie se cambian desde las propiedades de la pantalla; el cuerpo se ajusta para conservar el alto total.
+- La vista **Caja** simula `gotoScreen`, `rewind` (regresar) y `reset` (volver a la primera pantalla).
+- Solo se exporta **Caja**: no hay archivo Web ni conversión a 1280 / 1080. Una Caja importada y exportada sin cambios queda idéntica a la original.
+- Los colores, fuentes y tamaños vacíos del archivo se respetan (botones solo-imagen); el editor solo usa valores por defecto para dibujar.
+- El área visible (470.4 × 674.4) está deducida escalando el plano 1280 por 0.8; conviene confirmarla en el POS.
 
 ## Funciones principales
 

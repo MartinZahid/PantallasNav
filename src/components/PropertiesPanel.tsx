@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
-import type { PdtdButton } from '../types';
-import { clone, isTitle, makeTitle } from '../lib/pdtd';
+import type { ElementKind, PdtdButton, ZoneId } from '../types';
+import { ZONES, ZONE_LABELS, clone, elementAsButton, hasZone, isTitle, makeTitle, textAsButton, zoneElements } from '../lib/pdtd';
 import { profileForProject } from '../lib/profiles';
 import type { FontStyleKey, HorizontalAlignment, VerticalAlignment } from '../lib/textStyle';
-import { composeAlignment, parseFontStyles, splitAlignment, toggleFontStyle } from '../lib/textStyle';
+import { composeAlignment, imageDataUrl, parseFontStyles, splitAlignment, toggleFontStyle } from '../lib/textStyle';
 import { useEditor } from '../store';
 import { ActionsEditor } from './ActionsEditor';
 
@@ -27,7 +27,10 @@ const FONT_FAMILIES = [
 ];
 
 function rgbToHex(value: string): string {
-  const parts = String(value || '').split(',').map((part) => Number(part.trim()));
+  const source = String(value || '').trim();
+  if (/^#[0-9a-f]{6}$/i.test(source)) return source;
+  let parts = source.split(',').map((part) => Number(part.trim()));
+  if (parts.length === 4) parts = parts.slice(1);
   if (parts.length < 3 || parts.some((part) => !Number.isFinite(part))) return '#000000';
   return `#${parts.map((part) => Math.max(0, Math.min(255, part)).toString(16).padStart(2, '0')).join('')}`;
 }
@@ -54,7 +57,7 @@ function ColorField({
       <span>{label}</span>
       <span className="color-row">
         <input type="color" value={rgbToHex(value)} onFocus={onFocus} onChange={(event) => onChange(hexToRgb(event.target.value))} />
-        <input value={value} onFocus={onFocus} onChange={(event) => onChange(event.target.value)} />
+        <input value={value} placeholder="sin color" onFocus={onFocus} onChange={(event) => onChange(event.target.value)} />
       </span>
     </label>
   );
@@ -80,7 +83,7 @@ function NumberField({
       <span>{label}</span>
       <input
         type="number"
-        value={Number(value.toFixed(2))}
+        value={Number((Number(value) || 0).toFixed(2))}
         min={min}
         max={max}
         step={0.5}
@@ -168,7 +171,10 @@ function ButtonEditor({ part }: { part: 'props' | 'actions' }) {
   const imageInput = useRef<HTMLInputElement>(null);
   const screen = project?.screens.find((item) => item.uid === project.selectedScreenUid);
   const index = project?.selectedButtonIndex ?? null;
-  const button: PdtdButton | undefined = index !== null ? screen?.compact.Body.Buttons[index] : undefined;
+  const zone: ZoneId = project?.selectedZone ?? 'Body';
+  const kind: ElementKind = project?.selectedKind ?? 'button';
+  const isText = kind === 'text';
+  const button: PdtdButton | undefined = screen ? elementAsButton(screen.compact, zone, kind, index) : undefined;
   const [imageBusy, setImageBusy] = useState(false);
 
   if (!project || !screen || !button || index === null) return null;
@@ -215,7 +221,10 @@ function ButtonEditor({ part }: { part: 'props' | 'actions' }) {
       setGeometry({ X: nextX });
       return;
     }
-    const nextY = Math.round(Math.max(0, (profile.visibleHeight - button.Height) / 2) * 10) / 10;
+    const areaHeight = zone === 'Body' && !hasZone(screen.compact, 'Header')
+      ? profile.visibleHeight
+      : Number(screen.compact[zone].Height) || profile.visibleHeight;
+    const nextY = Math.round(Math.max(0, (areaHeight - button.Height) / 2) * 10) / 10;
     if (button.Y === nextY) return;
     beginTransaction();
     setGeometry({ Y: nextY });
@@ -254,11 +263,11 @@ function ButtonEditor({ part }: { part: 'props' | 'actions' }) {
       }
     };
     img.onerror = () => setImageBusy(false);
-    img.src = source.startsWith('data:') ? source : `data:image/png;base64,${source}`;
+    img.src = imageDataUrl(source);
   };
 
   const applyImage = (source: string, fit: boolean) => {
-    const dataUrl = source.startsWith('data:') ? source : `data:image/png;base64,${source}`;
+    const dataUrl = imageDataUrl(source);
     if (!fit) {
       beginTransaction();
       setIcon({ Imagen: dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl, SizeMode: 'Strech' });
@@ -298,14 +307,34 @@ function ButtonEditor({ part }: { part: 'props' | 'actions' }) {
     reader.readAsDataURL(file);
   };
 
+  const kindLabel = isText
+    ? `Texto de ${ZONE_LABELS[zone].toLowerCase()}`
+    : zone !== 'Body'
+      ? `Botón de ${ZONE_LABELS[zone].toLowerCase()}`
+      : isTitle(button)
+        ? 'Título / banner'
+        : 'Botón interactivo';
+  const fallbackName = `${isText ? 'Texto' : 'Botón'} ${index + 1}`;
+
+  if (part === 'actions' && isText) {
+    return (
+      <div className="properties-body">
+        <div className="section">
+          <div className="section-title">Acciones</div>
+          <p className="muted small">Los textos del encabezado no ejecutan acciones. Selecciona un botón para editar su secuencia.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (part === 'actions') {
     return (
       <div className="properties-body">
         <div className="selection-title">
           <span className={`type-dot ${isTitle(button) ? 'title-dot' : ''}`} />
           <div>
-            <strong>{button.Text.Text || `Botón ${index + 1}`}</strong>
-            <small>{isTitle(button) ? 'Título / banner' : 'Botón interactivo'} · índice {index + 1}</small>
+            <strong>{button.Text.Text || fallbackName}</strong>
+            <small>{kindLabel} · índice {index + 1}</small>
           </div>
         </div>
         <ActionsEditor button={button} screenUid={screen.uid} index={index} />
@@ -318,8 +347,8 @@ function ButtonEditor({ part }: { part: 'props' | 'actions' }) {
       <div className="selection-title">
         <span className={`type-dot ${isTitle(button) ? 'title-dot' : ''}`} />
         <div>
-          <strong>{button.Text.Text || `Botón ${index + 1}`}</strong>
-          <small>{isTitle(button) ? 'Título / banner' : 'Botón interactivo'} · índice {index + 1}</small>
+          <strong>{button.Text.Text || fallbackName}</strong>
+          <small>{kindLabel} · índice {index + 1}</small>
         </div>
       </div>
 
@@ -493,14 +522,19 @@ function ButtonEditor({ part }: { part: 'props' | 'actions' }) {
             <CenterYIcon />
           </button>
         </div>
-        <div className="muted tiny">Area visible de la Caja: {profile.visibleWidth} x {profile.visibleHeight}.</div>
+        <div className="muted tiny">
+          {zone === 'Body'
+            ? `Area visible de la Caja: ${profile.visibleWidth} x ${profile.visibleHeight}.`
+            : `${ZONE_LABELS[zone]}: ${profile.visibleWidth} x ${Number(screen.compact[zone].Height) || 0}. Las coordenadas son relativas a esta zona.`}
+        </div>
       </div>
 
+      {isText ? null : (
       <div className="section">
         <div className="section-title">Imagen</div>
         {button.Icon.Imagen ? (
           <div className="image-preview">
-            <img src={button.Icon.Imagen.startsWith('data:') ? button.Icon.Imagen : `data:image/png;base64,${button.Icon.Imagen}`} alt="" />
+            <img src={imageDataUrl(button.Icon.Imagen)} alt="" />
             <div className="image-actions">
               <button type="button" className="small-button" onClick={() => imageInput.current?.click()}>{imageBusy ? 'Leyendo…' : 'Cambiar'}</button>
               <button type="button" className="property-icon-button" title="Girar 90°" aria-label="Girar 90°" disabled={imageBusy} onClick={() => transformImage('rotate')}>
@@ -525,6 +559,7 @@ function ButtonEditor({ part }: { part: 'props' | 'actions' }) {
         </label>
         <div className="muted tiny">Para llenar el botón, la imagen debe ser cuadrada o usar “Estirar”.</div>
       </div>
+      )}
 
       <div className="section">
         <div className="section-title">Organizar</div>
@@ -543,7 +578,8 @@ function ScreenEditor() {
   const project = useEditor((state) => state.project);
   const profile = profileForProject(project);
   const updateScreen = useEditor((state) => state.updateScreen);
-  const updateBody = useEditor((state) => state.updateBody);
+  const updateZone = useEditor((state) => state.updateZone);
+  const addZoneElement = useEditor((state) => state.addZoneElement);
   const addButton = useEditor((state) => state.addButton);
   const beginTransaction = useEditor((state) => state.beginTransaction);
   const duplicateScreen = useEditor((state) => state.duplicateScreen);
@@ -565,14 +601,34 @@ function ScreenEditor() {
           <input value={screen.compact.Id} onFocus={beginTransaction} onChange={(event) => updateScreen(screen.uid, { Id: event.target.value })} />
         </label>
         <NumberField label="Índice" value={screen.compact.Index} min={1} onFocus={beginTransaction} onChange={(value) => updateScreen(screen.uid, { Index: value })} />
-        <ColorField label="Fondo del cuerpo" value={screen.compact.Body.BackColor} onFocus={beginTransaction} onChange={(value) => updateBody(screen.uid, { BackColor: value })} />
+        <ColorField label="Fondo del cuerpo" value={screen.compact.Body.BackColor} onFocus={beginTransaction} onChange={(value) => updateZone(screen.uid, 'Body', { BackColor: value })} />
         <div className="muted tiny">Cuerpo: {screen.compact.Body.Width} x {screen.compact.Body.Height}. Area visible: {profile.visibleWidth} x {profile.visibleHeight}.</div>
       </div>
+      {profile.cajaOnly || hasZone(screen.compact, 'Header') || hasZone(screen.compact, 'Footer') ? (
+        <div className="section">
+          <div className="section-title">Encabezado y pie</div>
+          <div className="grid-2">
+            <NumberField label="Alto encabezado" value={Number(screen.compact.Header.Height) || 0} min={0} onFocus={beginTransaction} onChange={(value) => updateZone(screen.uid, 'Header', { Height: value })} />
+            <ColorField label="Fondo encabezado" value={screen.compact.Header.BackColor} onFocus={beginTransaction} onChange={(value) => updateZone(screen.uid, 'Header', { BackColor: value })} />
+          </div>
+          <div className="button-row">
+            <button type="button" className="wide-button" onClick={() => addZoneElement('Header', 'button')}>+ Botón de encabezado</button>
+            <button type="button" className="wide-button" onClick={() => addZoneElement('Header', 'text')}>+ Título de encabezado</button>
+          </div>
+          <div className="grid-2">
+            <NumberField label="Alto pie" value={Number(screen.compact.Footer.Height) || 0} min={0} onFocus={beginTransaction} onChange={(value) => updateZone(screen.uid, 'Footer', { Height: value })} />
+            <ColorField label="Fondo pie" value={screen.compact.Footer.BackColor} onFocus={beginTransaction} onChange={(value) => updateZone(screen.uid, 'Footer', { BackColor: value })} />
+          </div>
+          <div className="muted tiny">El alto del cuerpo se ajusta solo para conservar el alto total de la pantalla.</div>
+        </div>
+      ) : null}
       <div className="section">
         <div className="section-title">Crear</div>
         <div className="button-row">
           <button type="button" className="wide-button" onClick={addButton}>+ Botón</button>
-          <button type="button" className="wide-button" onClick={() => { beginTransaction(); const title = clone(makeTitle('NUEVO TITULO', profile)); updateButtonAppend(screen.uid, title); }}>+ Título</button>
+          {profile.cajaOnly ? null : (
+            <button type="button" className="wide-button" onClick={() => { beginTransaction(); const title = clone(makeTitle('NUEVO TITULO', profile)); updateButtonAppend(screen.uid, title); }}>+ Título</button>
+          )}
         </div>
         <div className="button-row">
           <button type="button" className="small-button" onClick={() => duplicateScreen(screen.uid)}>Duplicar pantalla</button>
@@ -595,6 +651,8 @@ function updateButtonAppend(screenUid: string, button: PdtdButton) {
   if (!screen) return;
   screen.compact.Body.Buttons.push(button);
   next.selectedButtonIndex = screen.compact.Body.Buttons.length - 1;
+  next.selectedZone = 'Body';
+  next.selectedKind = 'button';
   useEditor.setState({ project: next, message: 'Título agregado.' });
 }
 
@@ -604,31 +662,51 @@ function ButtonList() {
   const selectButton = useEditor((state) => state.selectButton);
   const screen = project?.screens.find((item) => item.uid === project.selectedScreenUid);
   if (!project || !screen) return null;
+  const zoned = hasZone(screen.compact, 'Header') || hasZone(screen.compact, 'Footer');
+  const total = ZONES.reduce(
+    (sum, zone) => sum + screen.compact[zone].Buttons.length + (screen.compact[zone].Texts?.length ?? 0),
+    0,
+  );
+  const selectedZone: ZoneId = project.selectedZone ?? 'Body';
+  const selectedKind: ElementKind = project.selectedKind ?? 'button';
+  const row = (zone: ZoneId, kind: ElementKind, item: unknown, index: number) => {
+    const button = kind === 'text' ? textAsButton(item) : (item as PdtdButton);
+    const limit = zone === 'Body' && !zoned ? profile.visibleHeight : Number(screen.compact[zone].Height) || profile.visibleHeight;
+    const out =
+      Number(button.X) < -5 ||
+      Number(button.Y) < -5 ||
+      Number(button.X) + Number(button.Width) > profile.visibleWidth + 0.5 ||
+      Number(button.Y) + Number(button.Height) > limit + 5;
+    const selected = project.selectedButtonIndex === index && selectedZone === zone && selectedKind === kind;
+    return (
+      <button
+        type="button"
+        key={`${zone}-${kind}-${index}`}
+        className={`button-list-item ${selected ? 'selected' : ''}`}
+        onClick={() => selectButton(index, zone, kind)}
+      >
+        <span className="button-list-index">{index + 1}</span>
+        <span className="button-list-name">{button.Text.Text || <em>{button.Icon.Imagen ? 'Imagen' : 'Sin texto'}</em>}</span>
+        <span className="button-list-pos">{Number(button.X).toFixed(0)},{Number(button.Y).toFixed(0)}</span>
+        {out ? <span className="button-list-out">fuera</span> : null}
+        {kind === 'text' || isTitle(button) ? <span className="button-list-title">T</span> : null}
+      </button>
+    );
+  };
   return (
     <div className="button-list">
       <div className="button-list-heading">
-        <span>Botones de la pantalla</span>
-        <span>{screen.compact.Body.Buttons.length}</span>
+        <span>Elementos de la pantalla</span>
+        <span>{total}</span>
       </div>
       <div className="button-list-scroll">
-        {screen.compact.Body.Buttons.map((button, index) => {
-          const out = Number(button.X) < 0 || Number(button.Y) < 0 || Number(button.X) + Number(button.Width) > profile.visibleWidth + 0.5 || Number(button.Y) + Number(button.Height) > profile.visibleHeight + 0.5;
-          const selected = project.selectedButtonIndex === index;
-          return (
-            <button
-              type="button"
-              key={index}
-              className={`button-list-item ${selected ? 'selected' : ''}`}
-              onClick={() => selectButton(index)}
-            >
-              <span className="button-list-index">{index + 1}</span>
-              <span className="button-list-name">{button.Text.Text || <em>Sin texto</em>}</span>
-              <span className="button-list-pos">{Number(button.X).toFixed(0)},{Number(button.Y).toFixed(0)}</span>
-              {out ? <span className="button-list-out">fuera</span> : null}
-              {isTitle(button) ? <span className="button-list-title">T</span> : null}
-            </button>
-          );
-        })}
+        {ZONES.filter((zone) => hasZone(screen.compact, zone)).map((zone) => (
+          <div key={zone}>
+            {zoned ? <div className="button-list-zone">{ZONE_LABELS[zone]}</div> : null}
+            {zoneElements(screen.compact, zone, 'text').map((item, index) => row(zone, 'text', item, index))}
+            {zoneElements(screen.compact, zone, 'button').map((item, index) => row(zone, 'button', item, index))}
+          </div>
+        ))}
       </div>
     </div>
   );

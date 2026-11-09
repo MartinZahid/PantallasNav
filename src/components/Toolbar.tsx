@@ -120,7 +120,7 @@ export function Toolbar() {
           </div>
 
           <div className="tool-group">
-            <button type="button" className="ghost-button compact" onClick={exportWeb} disabled={isPreview} title="Descargar archivo Web">
+            <button type="button" className="ghost-button compact" onClick={exportWeb} disabled={isPreview || Boolean(profile.cajaOnly)} title={profile.cajaOnly ? 'El plano 1024 × 768 solo se exporta como Caja' : 'Descargar archivo Web'}>
               <Icon name="export" /> Web
             </button>
             <button type="button" className="ghost-button compact" onClick={exportCaja} disabled={isPreview} title="Descargar archivo Caja">
@@ -133,24 +133,25 @@ export function Toolbar() {
           </button>
 
           <div className="radio-group" role="radiogroup" aria-label="Plano de trabajo">
-            <label className={`radio-option ${profile.id === '1280' ? 'checked' : ''}`} title={`${PROFILES['1280'].visibleWidth}x${PROFILES['1280'].visibleHeight}`}>
-              <input
-                type="radio"
-                name="profile"
-                checked={profile.id === '1280'}
-                onChange={() => previewProfile('1280' as ProfileId)}
-              />
-              <span>1280</span>
-            </label>
-            <label className={`radio-option ${profile.id === '1080' ? 'checked' : ''}`} title={`${PROFILES['1080'].visibleWidth}x${PROFILES['1080'].visibleHeight}`}>
-              <input
-                type="radio"
-                name="profile"
-                checked={profile.id === '1080'}
-                onChange={() => previewProfile('1080' as ProfileId)}
-              />
-              <span>1080</span>
-            </label>
+            {(profile.cajaOnly ? (['1024'] as ProfileId[]) : (['1280', '1080'] as ProfileId[])).map((id) => (
+              <label
+                key={id}
+                className={`radio-option ${profile.id === id ? 'checked' : ''}`}
+                title={
+                  profile.cajaOnly
+                    ? 'Plano 1024 × 768: se edita tal cual y se exporta como Caja.'
+                    : `${PROFILES[id].visibleWidth}x${PROFILES[id].visibleHeight}`
+                }
+              >
+                <input
+                  type="radio"
+                  name="profile"
+                  checked={profile.id === id}
+                  onChange={() => previewProfile(id)}
+                />
+                <span>{PROFILES[id].short}</span>
+              </label>
+            ))}
           </div>
 
           <div className="tabs view-tabs">

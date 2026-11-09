@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import type { PdtdButton, ProfileId, Product, Project, ProjectScreen, ViewMode } from './types';
-import { profileForProject } from './lib/profiles';
+import type { ElementKind, PdtdButton, ProfileId, Product, Project, ProjectScreen, ViewMode, ZoneId } from './types';
+import { profileForId, profileForProject } from './lib/profiles';
 import { convertProjectProfile } from './lib/convert';
 import { loadLocalProject, localStorageFailureMessage, saveLocalProject } from './lib/storage';
 import {
@@ -12,6 +12,8 @@ import {
   importProjectText,
   makeButton,
   makeScreenFromTemplate,
+  makeZoneText,
+  zoneElements,
   nextScreenIndex,
   parseProducts,
   type TemplateId,
@@ -49,10 +51,11 @@ interface EditorState {
   importProducts: (rows: unknown[][]) => void;
   setName: (name: string) => void;
   selectScreen: (screenUid: string) => void;
-  selectButton: (index: number | null) => void;
+  selectButton: (index: number | null, zone?: ZoneId, kind?: ElementKind) => void;
   updateButton: (screenUid: string, index: number, patch: Partial<PdtdButton>, record?: boolean) => void;
   updateScreen: (screenUid: string, patch: { Id?: string; Index?: number }, record?: boolean) => void;
-  updateBody: (screenUid: string, patch: { BackColor?: string }, record?: boolean) => void;
+  updateZone: (screenUid: string, zone: ZoneId, patch: { BackColor?: string; Height?: number }, record?: boolean) => void;
+  addZoneElement: (zone: ZoneId, kind: ElementKind) => void;
   applyProjectChange: (
     next: Project,
     options?: { message?: string; selectedScreenUid?: string; selectedButtonIndex?: number | null },
@@ -96,9 +99,16 @@ function screenCopy(project: Project, screenUid: string): { project: Project; sc
   return { project: { ...project, screens }, screen };
 }
 
+/** Lista (botones o textos) a la que apunta la selección actual del proyecto. */
+function selectedList(project: Project, screen: ProjectScreen): any[] {
+  return zoneElements(screen.compact, project.selectedZone ?? 'Body', project.selectedKind ?? 'button');
+}
+
+// El historial guarda referencias: todos los cambios crean un proyecto nuevo antes de
+// modificar, así las imágenes en base64 se comparten entre pasos en vez de duplicarse.
 function pushHistory(state: EditorState, project: Project): Pick<EditorState, 'history' | 'future'> {
   return {
-    history: [...state.history, clone(project)].slice(-HISTORY_LIMIT),
+    history: [...state.history, project].slice(-HISTORY_LIMIT),
     future: [],
   };
 }
@@ -132,7 +142,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       history: [],
       future: [],
       view: 'editor',
-      message: `Proyecto ${profileId === '1080' ? '1080' : '1280'} creado.`,
+      message: `Proyecto ${profileForId(profileId).short} creado.`,
     }),
 
   previewProfile: (profileId) => {
@@ -142,11 +152,15 @@ export const useEditor = create<EditorState>((set, get) => ({
       set({ previewProject: null, message: 'Vista previa cancelada.' });
       return;
     }
+    if (profileForProject(source).cajaOnly || profileForId(profileId).cajaOnly) {
+      set({ message: 'El plano 1024 × 768 se edita tal cual; no se convierte a otros planos.' });
+      return;
+    }
     const previewProject = convertProjectProfile(source, profileId);
     set({
       previewProject,
       view: 'caja',
-      message: `Vista previa ${profileId === '1080' ? '1080' : '1280'}; aún no está aplicada.`,
+      message: `Vista previa ${profileForId(profileId).short}; aún no está aplicada.`,
     });
   },
 
@@ -177,7 +191,7 @@ export const useEditor = create<EditorState>((set, get) => ({
           history: [],
           future: [],
           view: 'editor',
-          message: `Importado: ${project.screens.length} pantallas.`,
+          message: `Importado: ${project.screens.length} pantallas · plano ${profileForProject(project).label}.`,
         };
       } catch (error) {
         return { ...state, message: error instanceof Error ? error.message : 'No se pudo importar.' };
@@ -243,21 +257,34 @@ export const useEditor = create<EditorState>((set, get) => ({
             ...state.previewProject,
             selectedScreenUid: screenUid,
             selectedButtonIndex: null,
+            selectedZone: 'Body',
+            selectedKind: 'button',
           },
         };
       }
       if (!state.project) return state;
-      const project = { ...state.project, selectedScreenUid: screenUid, selectedButtonIndex: null };
+      const project: Project = {
+        ...state.project,
+        selectedScreenUid: screenUid,
+        selectedButtonIndex: null,
+        selectedZone: 'Body',
+        selectedKind: 'button',
+      };
       return { project };
     }),
 
-  selectButton: (index) =>
+  selectButton: (index, zone, kind) =>
     set((state) => {
-      if (state.previewProject) {
-        return { previewProject: { ...state.previewProject, selectedButtonIndex: index } };
-      }
-      if (!state.project) return state;
-      return { project: { ...state.project, selectedButtonIndex: index } };
+      const target = state.previewProject ?? state.project;
+      if (!target) return state;
+      // Sin zona explícita se conserva la actual; al deseleccionar se vuelve al cuerpo.
+      const selection = {
+        selectedButtonIndex: index,
+        selectedZone: index === null ? 'Body' as ZoneId : zone ?? target.selectedZone ?? 'Body',
+        selectedKind: index === null ? 'button' as ElementKind : kind ?? (zone ? 'button' : target.selectedKind ?? 'button'),
+      };
+      if (state.previewProject) return { previewProject: { ...state.previewProject, ...selection } };
+      return { project: { ...target, ...selection } };
     }),
 
   beginTransaction: () => {
@@ -274,9 +301,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       const project = state.project;
       const copy = screenCopy(project, screenUid);
       if (!copy) return state;
-      const button = copy.screen.compact.Body.Buttons[index];
+      const button = selectedList(project, copy.screen)[index];
       if (!button) return state;
-      const key = `${screenUid}:${index}`;
+      const key = `${screenUid}:${project.selectedZone ?? 'Body'}:${project.selectedKind ?? 'button'}:${index}`;
       const now = Date.now();
       const historyPatch =
         nudgeSession && nudgeSession.key === key && now - nudgeSession.at <= NUDGE_WINDOW_MS
@@ -297,12 +324,24 @@ export const useEditor = create<EditorState>((set, get) => ({
       const project = state.project;
       const copy = screenCopy(project, screenUid);
       if (!copy) return state;
-      const button = copy.screen.compact.Body.Buttons[index];
+      const button = selectedList(project, copy.screen)[index];
       if (!button) return state;
       const historyPatch = record ? pushHistory(state, project) : {};
-      if (patch.Text) button.Text = { ...button.Text, ...patch.Text };
-      if (patch.Icon) button.Icon = { ...button.Icon, ...patch.Icon };
-      if (patch.Actions) button.Actions = patch.Actions;
+      if (project.selectedKind === 'text') {
+        // Un texto de zona es plano: Text, Color, BackColor, TextAlign y Font viven en la raíz.
+        if (patch.Text) {
+          const { Text, Color, BackColor, TextAlign, Font } = patch.Text;
+          if (typeof Text === 'string') button.Text = Text;
+          if (typeof Color === 'string') button.Color = Color;
+          if (typeof BackColor === 'string') button.BackColor = BackColor;
+          if (typeof TextAlign === 'string') button.TextAlign = TextAlign;
+          if (Font) button.Font = { ...button.Font, ...Font };
+        }
+      } else {
+        if (patch.Text) button.Text = { ...button.Text, ...patch.Text };
+        if (patch.Icon) button.Icon = { ...button.Icon, ...patch.Icon };
+        if (patch.Actions) button.Actions = patch.Actions;
+      }
       if (typeof patch.X === 'number') button.X = patch.X;
       if (typeof patch.Y === 'number') button.Y = patch.Y;
       if (typeof patch.Width === 'number') button.Width = patch.Width;
@@ -313,6 +352,63 @@ export const useEditor = create<EditorState>((set, get) => ({
       };
     }),
 
+  updateZone: (screenUid, zone, patch, record = false) =>
+    set((state) => {
+      if (!state.project) return state;
+      const project = state.project;
+      const copy = screenCopy(project, screenUid);
+      if (!copy) return state;
+      const historyPatch = record ? pushHistory(state, project) : {};
+      const compact = copy.screen.compact;
+      if (typeof patch.BackColor === 'string') compact[zone].BackColor = patch.BackColor;
+      if (typeof patch.Height === 'number' && Number.isFinite(patch.Height) && zone !== 'Body') {
+        // El alto total de la pantalla se conserva: lo que gana una zona lo cede el cuerpo.
+        const previous = Number(compact[zone].Height) || 0;
+        const bodyHeight = Number(compact.Body.Height) || 0;
+        const next = Math.max(0, Math.min(patch.Height, previous + bodyHeight - 20));
+        compact[zone].Height = next;
+        compact.Body.Height = Math.round((bodyHeight - (next - previous)) * 100) / 100;
+      }
+      return { ...historyPatch, project: copy.project };
+    }),
+
+  addZoneElement: (zone, kind) => {
+    const project = get().project;
+    if (!project?.selectedScreenUid || get().previewProject) return;
+    const next = clone(project);
+    const screen = next.screens.find((item) => item.uid === project.selectedScreenUid);
+    if (!screen) return;
+    const zoneData = screen.compact[zone];
+    if (zone !== 'Body' && !(Number(zoneData.Height) > 0)) {
+      const height = 70;
+      zoneData.Height = height;
+      screen.compact.Body.Height = Math.max(20, Number(screen.compact.Body.Height) - height);
+    }
+    const zoneHeight = Math.max(20, Number(zoneData.Height) || 70);
+    const list = zoneElements(screen.compact, zone, kind);
+    if (kind === 'text') {
+      list.push(makeZoneText(screen.compact.Id.toUpperCase(), { Height: Math.min(60, zoneHeight) }));
+    } else {
+      const side = zone === 'Body' ? 100 : Math.min(60, zoneHeight);
+      list.push(
+        makeButton('', {
+          X: 8 + (list.length % 5) * 12,
+          Y: 0,
+          Width: zone === 'Body' ? side : 43.2,
+          Height: side,
+        }),
+      );
+    }
+    next.selectedZone = zone;
+    next.selectedKind = kind;
+    next.selectedButtonIndex = list.length - 1;
+    set({
+      ...pushHistory(get(), project),
+      project: next,
+      message: kind === 'text' ? 'Texto agregado.' : 'Botón agregado.',
+    });
+  },
+
   updateScreen: (screenUid, patch, record = false) =>
     set((state) => {
       if (!state.project) return state;
@@ -322,17 +418,6 @@ export const useEditor = create<EditorState>((set, get) => ({
       const historyPatch = record ? pushHistory(state, project) : {};
       if (typeof patch.Index === 'number') copy.screen.compact.Index = patch.Index;
       if (typeof patch.Id === 'string') copy.screen.compact.Id = patch.Id;
-      return { ...historyPatch, project: copy.project };
-    }),
-
-  updateBody: (screenUid, patch, record = false) =>
-    set((state) => {
-      if (!state.project) return state;
-      const project = state.project;
-      const copy = screenCopy(project, screenUid);
-      if (!copy) return state;
-      const historyPatch = record ? pushHistory(state, project) : {};
-      if (typeof patch.BackColor === 'string') copy.screen.compact.Body.BackColor = patch.BackColor;
       return { ...historyPatch, project: copy.project };
     }),
 
@@ -357,6 +442,8 @@ export const useEditor = create<EditorState>((set, get) => ({
               : null;
       project.selectedScreenUid = selectedScreenUid;
       project.selectedButtonIndex = selectedButtonIndex;
+      project.selectedZone = 'Body';
+      project.selectedKind = 'button';
       return {
         ...pushHistory(state, state.project),
         project,
@@ -380,7 +467,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     const next = clone(project);
     next.screens.push(screen);
     next.selectedScreenUid = screen.uid;
-    next.selectedButtonIndex = 0;
+    next.selectedButtonIndex = compact.Body.Buttons.length ? 0 : null;
+    next.selectedZone = 'Body';
+    next.selectedKind = 'button';
     set({ ...pushHistory(get(), project), project: next, templateOpen: false, message: `Pantalla ${index} creada.` });
   },
 
@@ -406,6 +495,8 @@ export const useEditor = create<EditorState>((set, get) => ({
     next.screens.splice(at + 1, 0, screen);
     next.selectedScreenUid = screen.uid;
     next.selectedButtonIndex = null;
+    next.selectedZone = 'Body';
+    next.selectedKind = 'button';
     set({ ...pushHistory(get(), project), project: next, message: 'Pantalla duplicada.' });
   },
 
@@ -421,6 +512,8 @@ export const useEditor = create<EditorState>((set, get) => ({
     next.screens.splice(at, 1);
     next.selectedScreenUid = next.screens[Math.max(0, at - 1)]?.uid ?? null;
     next.selectedButtonIndex = null;
+    next.selectedZone = 'Body';
+    next.selectedKind = 'button';
     set({ ...pushHistory(get(), project), project: next, message: 'Pantalla eliminada.' });
   },
 
@@ -440,15 +533,19 @@ export const useEditor = create<EditorState>((set, get) => ({
     const project = get().project;
     if (!project?.selectedScreenUid) return;
     const screen = screenOf(project, project.selectedScreenUid);
+    const small = Boolean(profileForProject(project).cajaOnly);
     const button = makeButton('NUEVO BOTON', {
       X: 20 + (screen.compact.Body.Buttons.length % 5) * 20,
-      Y: 118 + (screen.compact.Body.Buttons.length % 5) * 20,
+      Y: (small ? 20 : 118) + (screen.compact.Body.Buttons.length % 5) * 20,
+      ...(small ? { Width: 100, Height: 100 } : {}),
     });
     const next = clone(project);
     const nextScreen = next.screens.find((item) => item.uid === project.selectedScreenUid);
     if (!nextScreen) return;
     nextScreen.compact.Body.Buttons.push(button);
     next.selectedButtonIndex = nextScreen.compact.Body.Buttons.length - 1;
+    next.selectedZone = 'Body';
+    next.selectedKind = 'button';
     set({ ...pushHistory(get(), project), project: next, message: 'Botón agregado.' });
   },
 
@@ -458,12 +555,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     const next = clone(project);
     const screen = next.screens.find((item) => item.uid === screenUid);
     if (!screen) return;
-    const source = screen.compact.Body.Buttons[index];
+    const list = selectedList(next, screen);
+    const source = list[index];
     if (!source) return;
     const button = clone(source);
     button.X += 10;
-    button.Y += 10;
-    screen.compact.Body.Buttons.splice(index + 1, 0, button);
+    if (next.selectedZone === undefined || next.selectedZone === 'Body') button.Y += 10;
+    list.splice(index + 1, 0, button);
     next.selectedButtonIndex = index + 1;
     set({ ...pushHistory(get(), project), project: next, message: 'Botón duplicado.' });
   },
@@ -472,7 +570,11 @@ export const useEditor = create<EditorState>((set, get) => ({
     const project = get().project;
     if (!project || get().previewProject) return;
     const screen = project.screens.find((item) => item.uid === screenUid);
-    const source = screen?.compact.Body.Buttons[index];
+    if (project.selectedKind === 'text') {
+      set({ message: 'Los textos del encabezado se duplican con Ctrl+D.' });
+      return;
+    }
+    const source = screen ? selectedList(project, screen)[index] : undefined;
     if (!source) return;
     set({
       clipboardButton: clone(source),
@@ -490,11 +592,15 @@ export const useEditor = create<EditorState>((set, get) => ({
     delete button.__index;
     button.X = Number(button.X) + 10;
     button.Y = Number(button.Y) + 10;
-    const selected = next.selectedScreenUid === screenUid ? next.selectedButtonIndex : null;
-    const at = selected === null || selected === undefined
-      ? screen.compact.Body.Buttons.length
-      : Math.min(selected + 1, screen.compact.Body.Buttons.length);
-    screen.compact.Body.Buttons.splice(at, 0, button);
+    // Se pega en la zona seleccionada (cuerpo por defecto); los textos no admiten botones.
+    const zone: ZoneId = next.selectedZone ?? 'Body';
+    const list = zoneElements(screen.compact, zone, 'button');
+    const selected =
+      next.selectedScreenUid === screenUid && next.selectedKind !== 'text' ? next.selectedButtonIndex : null;
+    const at = selected === null || selected === undefined ? list.length : Math.min(selected + 1, list.length);
+    list.splice(at, 0, button);
+    next.selectedZone = zone;
+    next.selectedKind = 'button';
     next.selectedScreenUid = screenUid;
     next.selectedButtonIndex = at;
     set({ ...pushHistory(state, state.project), project: next, message: 'Botón pegado.' });
@@ -506,8 +612,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     const next = clone(project);
     const screen = next.screens.find((item) => item.uid === screenUid);
     if (!screen) return;
-    screen.compact.Body.Buttons.splice(index, 1);
+    selectedList(next, screen).splice(index, 1);
     next.selectedButtonIndex = null;
+    next.selectedZone = 'Body';
+    next.selectedKind = 'button';
     set({ ...pushHistory(get(), project), project: next, message: 'Botón eliminado.' });
   },
 
@@ -517,7 +625,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const next = clone(project);
     const screen = next.screens.find((item) => item.uid === screenUid);
     if (!screen) return;
-    const buttons = screen.compact.Body.Buttons;
+    const buttons = selectedList(next, screen);
     const to = index + direction;
     if (index < 0 || to < 0 || to >= buttons.length) return;
     const [button] = buttons.splice(index, 1);
@@ -532,9 +640,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (!state.project || !state.history.length || state.previewProject) return state;
       const previous = state.history[state.history.length - 1];
       return {
-        project: clone(previous),
+        project: previous,
         history: state.history.slice(0, -1),
-        future: [clone(state.project), ...state.future].slice(0, HISTORY_LIMIT),
+        future: [state.project, ...state.future].slice(0, HISTORY_LIMIT),
       };
     });
   },
@@ -545,8 +653,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (!state.project || !state.future.length || state.previewProject) return state;
       const next = state.future[0];
       return {
-        project: clone(next),
-        history: [...state.history, clone(state.project)].slice(-HISTORY_LIMIT),
+        project: next,
+        history: [...state.history, state.project].slice(-HISTORY_LIMIT),
         future: state.future.slice(1),
       };
     });
@@ -559,6 +667,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
     const project = get().project;
     if (!project) return;
+    if (profileForProject(project).cajaOnly) {
+      set({ message: 'El plano 1024 × 768 solo se exporta como Caja.' });
+      return;
+    }
     downloadJson(webFromProject(project), exportFileName(project, 'web'));
     set({ message: 'Web exportado. Impórtalo en Point y verifica la Caja resultante.' });
   },

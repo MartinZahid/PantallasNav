@@ -8,6 +8,7 @@ import { ValidationPanel } from './components/ValidationPanel';
 import { AiAssistant } from './components/AiAssistant';
 import { useEditor } from './store';
 import { profileForProject } from './lib/profiles';
+import { elementAsButton } from './lib/pdtd';
 import { localStorageFailureMessage, saveLocalProject } from './lib/storage';
 import './App.css';
 
@@ -118,8 +119,8 @@ function App() {
   }, []);
 
   const screen = displayProject?.screens.find((item) => item.uid === displayProject.selectedScreenUid);
-  const button = screen && displayProject?.selectedButtonIndex !== null && displayProject?.selectedButtonIndex !== undefined
-    ? screen.compact.Body.Buttons[displayProject.selectedButtonIndex]
+  const button = screen
+    ? elementAsButton(screen.compact, displayProject?.selectedZone, displayProject?.selectedKind, displayProject?.selectedButtonIndex) ?? null
     : null;
 
   return (
@@ -135,7 +136,7 @@ function App() {
       <footer className="statusbar">
         <span className="status-mode">{view === 'editor' ? 'Editor' : view === 'caja' ? `Caja ${profile.short}` : view === 'portal' ? 'Portal (diagnóstico)' : 'Validación'}</span>
         <span>{screen ? `Pantalla ${String(screen.compact.Index).padStart(2, '0')} · ${screen.compact.Id}` : 'Sin pantalla'}</span>
-        <span>{button ? `Botón ${(displayProject?.selectedButtonIndex ?? 0) + 1} · ${button.Text.Text || 'sin texto'}` : 'Sin selección'}</span>
+        <span>{button ? `${displayProject?.selectedKind === 'text' ? 'Texto' : 'Botón'} ${(displayProject?.selectedButtonIndex ?? 0) + 1} · ${button.Text.Text || 'sin texto'}` : 'Sin selección'}</span>
         <span className="status-spacer" />
         <span>{screen?.compact.Body.Buttons.length ?? 0} botones</span>
         <span>{displayProject?.products.length ?? 0} productos</span>

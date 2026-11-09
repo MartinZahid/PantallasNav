@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { PdtdButton } from '../types';
-import { isTitle } from '../lib/pdtd';
+import { useEffect, useRef, useState } from 'react';
+import type { ElementKind, PdtdButton, PdtdScreen, ZoneId } from '../types';
+import { ZONES, ZONE_LABELS, elementAsButton, hasZone, isTitle, textAsButton, zoneElements, zoneOffsets } from '../lib/pdtd';
 import { profileForProject } from '../lib/profiles';
 import type { ActiveSnap, SnapRect } from '../lib/snapping';
 import { snapEdge, snapMove } from '../lib/snapping';
-import { fontCss, splitAlignment } from '../lib/textStyle';
+import { cssColor, fontCss, fontPixels, imageDataUrl, splitAlignment } from '../lib/textStyle';
 import { useEditor } from '../store';
 
 type CanvasMode = 'editor' | 'caja' | 'portal';
@@ -15,9 +15,12 @@ interface DragState {
   startX: number;
   startY: number;
   screenUid: string;
+  zone: ZoneId;
+  kind: ElementKind;
   index: number;
   origin: { x: number; y: number; w: number; h: number };
   others: SnapRect[];
+  limitY: number;
 }
 
 interface Guides {
@@ -39,8 +42,30 @@ function neighborRects(buttons: PdtdButton[], selected: number): SnapRect[] {
 
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 
+interface ElementRef {
+  zone: ZoneId;
+  kind: ElementKind;
+  index: number;
+}
+
 function parseFontSize(button: PdtdButton): number {
-  return Math.max(7, Math.round(Number(button.Text?.Font?.Size ?? 9) * 1.33));
+  return fontPixels(button.Text?.Font?.Size);
+}
+
+/** Acción de navegación que la vista Caja puede simular para un botón. */
+type Navigation = { type: 'goto'; target: number } | { type: 'rewind' } | { type: 'reset' };
+
+function isTrue(value: unknown): boolean {
+  return value === true || value === 1 || String(value).toLowerCase() === 'true' || value === '1';
+}
+
+function navigationOf(button: PdtdButton): Navigation | null {
+  const target = gotoScreenTarget(button);
+  if (target !== null) return { type: 'goto', target };
+  const actions = button.Actions ?? [];
+  if (actions.some((action) => String(action.Type) === 'rewind' && isTrue(action.Value))) return { type: 'rewind' };
+  if (actions.some((action) => String(action.Type) === 'reset' && isTrue(action.Value))) return { type: 'reset' };
+  return null;
 }
 
 function alignmentStyle(button: PdtdButton): React.CSSProperties {
@@ -129,9 +154,9 @@ function buttonStyle(button: PdtdButton, selected: boolean, editable: boolean, n
     top: Number(button.Y),
     width: Number(button.Width),
     height: Number(button.Height),
-    backgroundColor: `rgb(${button.Text?.BackColor ?? '0,0,0'})`,
-    color: `rgb(${button.Text?.Color ?? '255,255,255'})`,
-    backgroundImage: image ? `url(${image.startsWith('data:') ? image : `data:image/png;base64,${image}`})` : undefined,
+    backgroundColor: cssColor(button.Text?.BackColor ?? '0,0,0', 'transparent'),
+    color: cssColor(button.Text?.Color ?? '255,255,255', 'rgb(0, 0, 0)'),
+    backgroundImage: image ? `url(${imageDataUrl(image)})` : undefined,
     backgroundSize: '100% 100%',
     backgroundRepeat: 'no-repeat',
     fontFamily: button.Text?.Font?.Family || 'Arial Black',
@@ -172,7 +197,7 @@ function ButtonView({
   onResizeStart: (event: React.PointerEvent, dir: string, index: number) => void;
   onClick: (index: number) => void;
   onActivate: (index: number) => void;
-  onStartEdit: (index: number) => void;
+  onStartEdit: (index: number, timeStamp: number) => void;
   onCommitText: (index: number, value: string) => void;
   onCancelEdit: () => void;
 }) {
@@ -195,7 +220,7 @@ function ButtonView({
         if (!editable) return;
         event.preventDefault();
         event.stopPropagation();
-        onStartEdit(index);
+        onStartEdit(index, event.timeStamp);
       }}
     >
       {editing ? (
@@ -208,7 +233,7 @@ function ButtonView({
         />
       ) : (
         <span className="canvas-label" style={{ ...alignmentStyle(button), ...fontCss(button.Text?.Font?.FontStyle) }}>
-          {button.Text?.Text || (editable ? <em>SIN TEXTO</em> : '')}
+          {button.Text?.Text || (editable && !button.Icon?.Imagen ? <em>SIN TEXTO</em> : '')}
         </span>
       )}
       {editable && selected && !editing
@@ -243,15 +268,18 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
   const setMessage = useEditor((state) => state.setMessage);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [guides, setGuides] = useState<Guides>({ x: null, y: null });
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editing, setEditing] = useState<ElementRef | null>(null);
+  const visitedRef = useRef<string[]>([]);
   const dragRef = useRef<DragState | null>(null);
   const activeSnapRef = useRef<Guides>({ x: null, y: null });
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const lastPointerDownRef = useRef<{ index: number; at: number } | null>(null);
+  const lastPointerDownRef = useRef<{ key: string; at: number } | null>(null);
 
   const displayProject = previewProject ?? project;
   const screen = displayProject?.screens.find((item) => item.uid === displayProject.selectedScreenUid);
   const selectedIndex = displayProject?.selectedButtonIndex ?? null;
+  const selectedZone: ZoneId = displayProject?.selectedZone ?? 'Body';
+  const selectedKind: ElementKind = displayProject?.selectedKind ?? 'button';
   const profile = profileForProject(displayProject);
   const preview = Boolean(previewProject);
 
@@ -279,7 +307,7 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
 
       if (current.type === 'move') {
         x = Math.max(-w + 20, Math.min(profile.visibleWidth - 20, current.origin.x + dx));
-        y = Math.max(-h + 20, Math.min(profile.visibleHeight - 20, current.origin.y + dy));
+        y = Math.max(-h + 20, Math.min(current.limitY - 20, current.origin.y + dy));
         const snapX = snapMove(
           { x, y, w, h, index: current.index },
           current.others,
@@ -362,95 +390,95 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
-  }, [drag, fitScale, snap, updateButton, profile.visibleWidth, profile.visibleHeight]);
+  }, [drag, fitScale, snap, updateButton, profile.visibleWidth]);
 
-  const startMove = (event: React.PointerEvent, index: number) => {
+  const refKey = (ref: ElementRef) => `${ref.zone}:${ref.kind}:${ref.index}`;
+  const sameRef = (left: ElementRef | null, right: ElementRef) =>
+    Boolean(left && left.zone === right.zone && left.kind === right.kind && left.index === right.index);
+  const elementOf = (ref: ElementRef): PdtdButton | undefined =>
+    screen ? elementAsButton(screen.compact, ref.zone, ref.kind, ref.index) : undefined;
+  const zoneLimit = (compact: PdtdScreen, zone: ZoneId) =>
+    zone === 'Body' ? profile.visibleHeight : Math.max(20, Number(compact[zone].Height) || 0);
+
+  const beginDrag = (event: React.PointerEvent, ref: ElementRef, type: 'move' | 'resize', dir: string) => {
     if (!screen) return;
-    if (editingIndex !== null) {
-      if (editingIndex !== index) (document.activeElement as HTMLElement | null)?.blur();
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    const now = Date.now();
-    const previous = lastPointerDownRef.current;
-    lastPointerDownRef.current = { index, at: now };
-    if (previous && previous.index === index && now - previous.at < 400) {
-      selectButton(index);
-      return;
-    }
-    const button = screen.compact.Body.Buttons[index];
+    const button = elementOf(ref);
     if (!button) return;
-    selectButton(index);
+    selectButton(ref.index, ref.zone, ref.kind);
     beginTransaction();
     activeSnapRef.current = { x: null, y: null };
     setGuides({ x: null, y: null });
+    const list = zoneElements(screen.compact, ref.zone, ref.kind) as PdtdButton[];
     const state: DragState = {
-      type: 'move',
-      dir: '',
-      startX: event.clientX,
-      startY: event.clientY,
-      screenUid: screen.uid,
-      index,
-      origin: { x: Number(button.X), y: Number(button.Y), w: Number(button.Width), h: Number(button.Height) },
-      others: neighborRects(screen.compact.Body.Buttons, index),
-    };
-    dragRef.current = state;
-    setDrag(state);
-  };
-
-  const startResize = (event: React.PointerEvent, dir: string, index: number) => {
-    if (!screen) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const button = screen.compact.Body.Buttons[index];
-    if (!button) return;
-    selectButton(index);
-    beginTransaction();
-    activeSnapRef.current = { x: null, y: null };
-    setGuides({ x: null, y: null });
-    const state: DragState = {
-      type: 'resize',
+      type,
       dir,
       startX: event.clientX,
       startY: event.clientY,
       screenUid: screen.uid,
-      index,
+      zone: ref.zone,
+      kind: ref.kind,
+      index: ref.index,
       origin: { x: Number(button.X), y: Number(button.Y), w: Number(button.Width), h: Number(button.Height) },
-      others: neighborRects(screen.compact.Body.Buttons, index),
+      others: neighborRects(list, ref.index),
+      limitY: zoneLimit(screen.compact, ref.zone),
     };
     dragRef.current = state;
     setDrag(state);
   };
 
-  const startEdit = (index: number) => {
-    if (mode !== 'editor' || preview || !screen) return;
+  const startMove = (event: React.PointerEvent, ref: ElementRef) => {
+    if (!screen) return;
+    if (editing !== null) {
+      if (!sameRef(editing, ref)) (document.activeElement as HTMLElement | null)?.blur();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    // preventDefault evita el cambio de foco; se quita a mano para que las flechas muevan el elemento.
+    (document.activeElement as HTMLElement | null)?.blur();
+    const now = event.timeStamp;
     const previous = lastPointerDownRef.current;
-    if (!previous || previous.index !== index || Date.now() - previous.at > 400) beginTransaction();
-    selectButton(index);
-    setEditingIndex(index);
+    lastPointerDownRef.current = { key: refKey(ref), at: now };
+    if (previous && previous.key === refKey(ref) && now - previous.at < 400) {
+      selectButton(ref.index, ref.zone, ref.kind);
+      return;
+    }
+    beginDrag(event, ref, 'move', '');
   };
 
-  const commitText = (index: number, value: string) => {
-    setEditingIndex(null);
+  const startResize = (event: React.PointerEvent, dir: string, ref: ElementRef) => {
+    event.preventDefault();
+    event.stopPropagation();
+    beginDrag(event, ref, 'resize', dir);
+  };
+
+  const startEdit = (ref: ElementRef, timeStamp: number) => {
+    if (mode !== 'editor' || preview || !screen) return;
+    const previous = lastPointerDownRef.current;
+    if (!previous || previous.key !== refKey(ref) || timeStamp - previous.at > 400) beginTransaction();
+    selectButton(ref.index, ref.zone, ref.kind);
+    setEditing(ref);
+  };
+
+  const commitText = (ref: ElementRef, value: string) => {
+    setEditing(null);
     if (!screen) return;
-    const button = screen.compact.Body.Buttons[index];
+    const button = elementOf(ref);
     if (!button) return;
     const text = value.trim();
     if ((button.Text?.Text ?? '') === text) return;
-    updateButton(screen.uid, index, { Text: { ...button.Text, Text: text } }, false);
+    selectButton(ref.index, ref.zone, ref.kind);
+    updateButton(screen.uid, ref.index, { Text: { ...button.Text, Text: text } }, false);
   };
 
-  const cancelEdit = () => setEditingIndex(null);
+  const cancelEdit = () => setEditing(null);
 
-  const portalButtons = useMemo(() => {
-    if (!screen) return [];
-    return screen.compact.Body.Buttons.map((button, index) => {
-      const fx = profile.portalWidth / Number(screen.compact.Body.Width || profile.bodyWidth);
-      const fy = profile.portalHeight / Number(screen.compact.Body.Height || profile.bodyHeight);
-      return { button, index, x: Number(button.X) * fx, y: Number(button.Y) * fy, w: Number(button.Width) * fx, h: Number(button.Height) * fy };
-    });
-  }, [screen, profile.bodyWidth, profile.bodyHeight, profile.portalWidth, profile.portalHeight]);
+  const portalButtons = (screen?.compact.Body.Buttons ?? []).map((button, index) => {
+    const body = screen!.compact.Body;
+    const fx = profile.portalWidth / Number(body.Width || profile.bodyWidth);
+    const fy = profile.portalHeight / Number(body.Height || profile.bodyHeight);
+    return { button, index, x: Number(button.X) * fx, y: Number(button.Y) * fy, w: Number(button.Width) * fx, h: Number(button.Height) * fy };
+  });
 
   const magnetic = new Set<number>();
   if (guides.x) magnetic.add(guides.x.neighbor);
@@ -460,17 +488,40 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
     return <div className="empty-stage">Importa un archivo Web o Caja para comenzar.</div>;
   }
 
-  const activateButton = (index: number) => {
+  const describeNavigation = (navigation: Navigation | null): string | undefined => {
+    if (!navigation) return undefined;
+    if (navigation.type === 'rewind') return 'Regresar a la pantalla anterior';
+    if (navigation.type === 'reset') return 'Reiniciar: volver a la primera pantalla';
+    const target = displayProject.screens.find((item) => Number(item.compact.Index) === navigation.target);
+    return target
+      ? `Ir a pantalla ${navigation.target} · ${target.compact.Id}`
+      : `Pantalla ${navigation.target} no encontrada`;
+  };
+
+  const activateButton = (ref: ElementRef) => {
     if (mode !== 'caja') return;
-    const button = screen.compact.Body.Buttons[index];
-    if (!button) return;
-    const targetIndex = gotoScreenTarget(button);
-    if (targetIndex === null) return;
-    const target = displayProject.screens.find((item) => Number(item.compact.Index) === targetIndex);
-    if (!target) {
-      setMessage(`No encontré la pantalla ${targetIndex} en este proyecto.`);
+    const button = elementOf(ref);
+    const navigation = button ? navigationOf(button) : null;
+    if (!navigation) return;
+    if (navigation.type === 'rewind') {
+      const previousUid = visitedRef.current.pop();
+      const previous = displayProject.screens.find((item) => item.uid === previousUid);
+      if (previous) selectScreen(previous.uid);
+      else setMessage('No hay una pantalla anterior a la cual regresar.');
       return;
     }
+    if (navigation.type === 'reset') {
+      visitedRef.current = [];
+      const first = displayProject.screens[0];
+      if (first && first.uid !== screen.uid) selectScreen(first.uid);
+      return;
+    }
+    const target = displayProject.screens.find((item) => Number(item.compact.Index) === navigation.target);
+    if (!target) {
+      setMessage(`No encontré la pantalla ${navigation.target} en este proyecto.`);
+      return;
+    }
+    visitedRef.current = [...visitedRef.current.slice(-50), screen.uid];
     selectScreen(target.uid);
   };
 
@@ -492,10 +543,10 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
                   top: y,
                   width: w,
                   height: h,
-                  backgroundColor: `rgb(${button.Text?.BackColor ?? '0,0,0'})`,
-                  color: `rgb(${button.Text?.Color ?? '255,255,255'})`,
+                  backgroundColor: cssColor(button.Text?.BackColor ?? '0,0,0', 'transparent'),
+                  color: cssColor(button.Text?.Color ?? '255,255,255', 'rgb(0, 0, 0)'),
                   fontFamily: button.Text?.Font?.Family || 'Arial Black',
-                  fontSize: Math.max(7, Number(button.Text?.Font?.Size ?? 9) * 1.33),
+                  fontSize: fontPixels(button.Text?.Font?.Size),
                   ...fontCss(button.Text?.Font?.FontStyle),
                 }}
               >
@@ -508,13 +559,56 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
     );
   }
 
+  const offsets = zoneOffsets(screen.compact);
+  const zoned = hasZone(screen.compact, 'Header') || hasZone(screen.compact, 'Footer');
+  const isEmpty = ZONES.every(
+    (zone) => !screen.compact[zone].Buttons?.length && !screen.compact[zone].Texts?.length,
+  );
+
+  const renderElements = (zone: ZoneId, kind: ElementKind) =>
+    (zoneElements(screen.compact, zone, kind) as PdtdButton[]).map((item, index) => {
+      const ref: ElementRef = { zone, kind, index };
+      const button = kind === 'text' ? textAsButton(item) : item;
+      const navigation = mode === 'caja' && kind === 'button' ? navigationOf(button) : null;
+      const isSelected = selectedIndex === index && selectedZone === zone && selectedKind === kind;
+      const dragging = drag && drag.zone === zone && drag.kind === kind;
+      return (
+        <ButtonView
+          key={`${kind}-${index}`}
+          button={{ ...button, __index: index }}
+          selected={mode === 'editor' && isSelected}
+          editable={mode === 'editor' && !preview}
+          editing={mode === 'editor' && !preview && sameRef(editing, ref)}
+          navigable={navigation !== null}
+          navigationTitle={describeNavigation(navigation)}
+          mode={mode}
+          magnetic={mode === 'editor' && Boolean(dragging) && magnetic.has(index)}
+          onPointerDown={(event) => startMove(event, ref)}
+          onResizeStart={(event, dir) => startResize(event, dir, ref)}
+          onClick={() => selectButton(index, zone, kind)}
+          onActivate={() => activateButton(ref)}
+          onStartEdit={(_, timeStamp) => startEdit(ref, timeStamp)}
+          onCommitText={(_, value) => commitText(ref, value)}
+          onCancelEdit={cancelEdit}
+        />
+      );
+    });
+
+  const renderGuides = (zone: ZoneId) =>
+    mode === 'editor' && drag && drag.zone === zone ? (
+      <>
+        {guides.x ? <div className="snap-guide snap-guide-x" style={{ left: guides.x.guide }} /> : null}
+        {guides.y ? <div className="snap-guide snap-guide-y" style={{ top: guides.y.guide }} /> : null}
+      </>
+    ) : null;
+
   return (
     <div className="stage-scroll" ref={stageRef}>
       <div className="canvas-caption">
         <strong>
           {mode === 'caja' ? 'Caja' : 'Editor'} {profile.short} - {profile.visibleWidth}x{profile.visibleHeight}
         </strong>
-        <span>{mode === 'caja' ? 'Así se ve en el POS. Haz clic en un botón con Ir a pantalla para navegar.' : 'Doble clic en un botón para escribir · arrastra para mover · usa las esquinas para redimensionar · clic en el fondo para deseleccionar.'}</span>
+        <span>{mode === 'caja' ? 'Así se ve en el POS. Haz clic en un botón con Ir a pantalla o Regresar para navegar.' : 'Doble clic en un botón para escribir · arrastra para mover · usa las esquinas para redimensionar · clic en el fondo para deseleccionar.'}</span>
       </div>
       <div
         className="canvas-frame"
@@ -528,48 +622,31 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
             transform: `scale(${fitScale})`,
           }}
           onPointerDown={() => {
-            if (editingIndex !== null) (document.activeElement as HTMLElement | null)?.blur();
+            if (editing !== null) (document.activeElement as HTMLElement | null)?.blur();
             if (mode === 'editor') selectButton(null);
           }}
         >
-          {screen.compact.Body.Buttons.map((button, index) => {
-            const targetIndex = mode === 'caja' ? gotoScreenTarget(button) : null;
-            const target = targetIndex === null
-              ? undefined
-              : displayProject.screens.find((item) => Number(item.compact.Index) === targetIndex);
-            const navigationTitle = targetIndex === null
-              ? undefined
-              : target
-                ? `Ir a pantalla ${targetIndex} · ${target.compact.Id}`
-                : `Pantalla ${targetIndex} no encontrada`;
+          {ZONES.filter((zone) => hasZone(screen.compact, zone)).map((zone) => {
+            const data = screen.compact[zone];
+            const height = zone === 'Body' && !zoned ? profile.visibleHeight : Math.max(0, Number(data.Height) || 0);
             return (
-              <ButtonView
-                key={index}
-                button={{ ...button, __index: index }}
-                selected={mode === 'editor' && selectedIndex === index}
-                editable={mode === 'editor' && !preview}
-                editing={mode === 'editor' && !preview && editingIndex === index}
-                navigable={targetIndex !== null}
-                navigationTitle={navigationTitle}
-                mode={mode}
-                magnetic={mode === 'editor' && magnetic.has(index)}
-                onPointerDown={startMove}
-                onResizeStart={startResize}
-                onClick={selectButton}
-                onActivate={activateButton}
-                onStartEdit={startEdit}
-                onCommitText={commitText}
-                onCancelEdit={cancelEdit}
-              />
+              <div
+                key={zone}
+                className={`screen-zone zone-${zone.toLowerCase()} ${zoned ? 'zoned' : ''} ${zoned && mode === 'caja' ? 'clip' : ''}`}
+                style={{
+                  top: offsets[zone],
+                  height,
+                  backgroundColor: zone === 'Body' ? undefined : cssColor(data.BackColor, 'transparent'),
+                }}
+              >
+                {zoned && mode === 'editor' ? <span className="zone-tag">{ZONE_LABELS[zone]}</span> : null}
+                {renderElements(zone, 'text')}
+                {renderElements(zone, 'button')}
+                {renderGuides(zone)}
+              </div>
             );
           })}
-          {mode === 'editor' && guides.x ? (
-            <div className="snap-guide snap-guide-x" style={{ left: guides.x.guide }} />
-          ) : null}
-          {mode === 'editor' && guides.y ? (
-            <div className="snap-guide snap-guide-y" style={{ top: guides.y.guide }} />
-          ) : null}
-          {mode === 'editor' && !screen.compact.Body.Buttons.length ? (
+          {mode === 'editor' && isEmpty ? (
             <div className="blank-hint">
               <div>Pantalla vacía</div>
               <small>Agrega un botón o título desde el panel derecho.</small>

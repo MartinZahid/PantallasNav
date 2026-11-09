@@ -11,6 +11,8 @@ import type {
   ValidationIssue,
   WebDesign,
   Zone,
+  ZoneId,
+  ElementKind,
 } from '../types';
 import {
   PROFILE_1280,
@@ -19,7 +21,7 @@ import {
   profileFromCaja,
   profileFromWeb,
 } from './profiles';
-import { fontHtml, parseFontStyles, splitAlignment } from './textStyle';
+import { fontHtml, imageDataUrl, parseFontStyles, splitAlignment } from './textStyle';
 
 export const VISIBLE_WIDTH = 588;
 export const VISIBLE_HEIGHT = 843;
@@ -144,6 +146,93 @@ export function compactFromWeb(screen: PdtdScreen, profile: DesignProfile = PROF
     Body: clone(normalized.Body),
     Footer: clone(normalized.Footer),
   };
+}
+
+export const ZONES: ZoneId[] = ['Header', 'Body', 'Footer'];
+
+export const ZONE_LABELS: Record<ZoneId, string> = {
+  Header: 'Encabezado',
+  Body: 'Cuerpo',
+  Footer: 'Pie',
+};
+
+/** Lista de botones o de textos de una zona (normalizeZone garantiza que existan). */
+export function zoneElements(screen: PdtdScreen, zone: ZoneId = 'Body', kind: ElementKind = 'button'): Json[] {
+  const data = screen[zone] as Zone | undefined;
+  const list = kind === 'text' ? data?.Texts : data?.Buttons;
+  return Array.isArray(list) ? list : [];
+}
+
+/** Adapta un elemento de `Texts` (texto plano con geometría) a la forma de un botón. */
+export function textAsButton(text: Json): PdtdButton {
+  const source: any = text ?? {};
+  const font: any = source.Font ?? {};
+  return {
+    Text: {
+      Text: String(source.Text ?? ''),
+      Color: String(source.Color ?? ''),
+      BackColor: String(source.BackColor ?? ''),
+      TextAlign: String(source.TextAlign ?? 'MiddleCenter'),
+      Font: {
+        Family: String(font.Family ?? ''),
+        Size: number(font.Size, 12),
+        FontStyle: String(font.FontStyle ?? ''),
+      },
+      X: 0,
+      Y: 0,
+      Width: 0,
+      Height: 0,
+    },
+    Icon: { Imagen: '', SizeMode: '', X: 0, Y: 0, Width: 0, Height: 0 },
+    Actions: [],
+    X: number(source.X, 0),
+    Y: number(source.Y, 0),
+    Width: number(source.Width, 100),
+    Height: number(source.Height, 40),
+  };
+}
+
+/** Elemento seleccionado, siempre con forma de botón. */
+export function elementAsButton(
+  screen: PdtdScreen,
+  zone: ZoneId = 'Body',
+  kind: ElementKind = 'button',
+  index: number | null | undefined,
+): PdtdButton | undefined {
+  if (index === null || index === undefined) return undefined;
+  const item = zoneElements(screen, zone, kind)[index];
+  if (!item) return undefined;
+  return kind === 'text' ? textAsButton(item) : (item as PdtdButton);
+}
+
+/** Texto nuevo para `Texts` de una zona. */
+export function makeZoneText(text = 'TITULO', overrides: Record<string, Json> = {}): Json {
+  return {
+    Text: text,
+    Color: '',
+    BackColor: '',
+    TextAlign: 'BottomCenter',
+    Font: { Family: 'Courier New', Size: 20, FontStyle: '' },
+    X: 60,
+    Y: 0,
+    Width: 240,
+    Height: 60,
+    ...overrides,
+  };
+}
+
+/** Indica si la pantalla usa Encabezado o Pie (planos con zonas, como 1024). */
+export function hasZone(screen: PdtdScreen, zone: ZoneId): boolean {
+  if (zone === 'Body') return true;
+  const data = screen[zone] as Zone | undefined;
+  return Boolean(data && (number(data.Height) > 0 || data.Buttons?.length || data.Texts?.length));
+}
+
+/** Posición vertical (top) de cada zona dentro de la pantalla. */
+export function zoneOffsets(screen: PdtdScreen): Record<ZoneId, number> {
+  const header = Math.max(0, number(screen.Header?.Height));
+  const body = Math.max(0, number(screen.Body?.Height));
+  return { Header: 0, Body: header, Footer: header + body };
 }
 
 export function isTitle(button: PdtdButton): boolean {
@@ -422,7 +511,7 @@ export function normalizeProject(input: unknown): Project {
     }
   }
   const profileId: ProfileId =
-    source.profileId === '1080' || source.profileId === '1280'
+    source.profileId === '1080' || source.profileId === '1280' || source.profileId === '1024'
       ? source.profileId
       : profileFromCaja(rawScreens.map((item) => (isPlainObject(item) ? item.compact : undefined)));
   const profile = profileForId(profileId);
@@ -443,8 +532,13 @@ export function normalizeProject(input: unknown): Project {
   });
   const selected = screens.find((screen) => screen.uid === source.selectedScreenUid) ?? screens[0];
   const requestedIndex = typeof source.selectedButtonIndex === 'number' ? source.selectedButtonIndex : null;
+  const selectedZone: ZoneId =
+    source.selectedZone === 'Header' || source.selectedZone === 'Footer' ? source.selectedZone : 'Body';
+  const selectedKind: ElementKind = source.selectedKind === 'text' ? 'text' : 'button';
   const selectedButtonIndex =
-    requestedIndex !== null && selected.compact.Body.Buttons[requestedIndex] ? requestedIndex : null;
+    requestedIndex !== null && zoneElements(selected.compact, selectedZone, selectedKind)[requestedIndex]
+      ? requestedIndex
+      : null;
   return {
     name: typeof source.name === 'string' && source.name.trim() ? source.name : profile.defaultName,
     profileId,
@@ -454,6 +548,8 @@ export function normalizeProject(input: unknown): Project {
     products: normalizeProducts(source.products),
     selectedScreenUid: selected.uid,
     selectedButtonIndex,
+    selectedZone: selectedButtonIndex === null ? 'Body' : selectedZone,
+    selectedKind: selectedButtonIndex === null ? 'button' : selectedKind,
   };
 }
 
@@ -490,7 +586,7 @@ function imageUrl(value: string): string {
   const clean = String(value ?? '').trim().replace(/\s+/g, '');
   if (!clean) return '';
   if (/^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(clean)) return clean;
-  if (/^[A-Za-z0-9+/=]+$/.test(clean)) return `data:image/png;base64,${clean}`;
+  if (/^[A-Za-z0-9+/=]+$/.test(clean)) return imageDataUrl(clean);
   return '';
 }
 
@@ -801,117 +897,112 @@ export function validateProject(project: Project): ValidationIssue[] {
   const indexSet = new Set(project.screens.map((screen) => number(screen.compact.Index)));
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
+  // Los archivos de Point suelen traer coordenadas de -1 a -4; no son recortes reales.
+  const EDGE_TOLERANCE = 5;
   for (const screen of project.screens) {
     const compact = screen.compact;
+    const screenName = compact.Id;
+    const base = { screenUid: screen.uid, screenIndex: compact.Index, screenName };
     if (indexes.has(compact.Index)) {
-      issues.push({
-        screenUid: screen.uid,
-        screenIndex: compact.Index,
-        screenName: compact.Id,
-        level: 'error',
-        message: `Índice ${compact.Index} duplicado con ${indexes.get(compact.Index)}.`,
-      });
+      issues.push({ ...base, level: 'error', message: `Índice ${compact.Index} duplicado con ${indexes.get(compact.Index)}.` });
     } else {
       indexes.set(compact.Index, compact.Id);
     }
     if (ids.has(compact.Id)) {
-      issues.push({
-        screenUid: screen.uid,
-        screenIndex: compact.Index,
-        screenName: compact.Id,
-        level: 'error',
-        message: `Id ${compact.Id} duplicado.`,
-      });
+      issues.push({ ...base, level: 'error', message: `Id ${compact.Id} duplicado.` });
     } else {
       ids.set(compact.Id, compact.Id);
     }
-    const buttons = compact.Body.Buttons;
-    for (let i = 0; i < buttons.length; i += 1) {
-      const button = buttons[i];
-      const x = number(button.X);
-      const y = number(button.Y);
-      const w = number(button.Width);
-      const h = number(button.Height);
-      const screenName = compact.Id;
-      if (
-        x < 0 ||
-        y < 0 ||
-        x + w > profile.visibleWidth + 0.5 ||
-        y + h > profile.visibleHeight + 0.5
-      ) {
-        issues.push({
-          screenUid: screen.uid,
-          screenIndex: compact.Index,
-          screenName,
-          buttonUid: String(i),
-          level: 'error',
-          message: `“${button.Text.Text || `Botón ${i + 1}`}” sale del área visible (${x.toFixed(0)}, ${y.toFixed(0)}, ${w.toFixed(0)}×${h.toFixed(0)}).`,
-        });
-      }
-      if (!button.Text.Text && !button.Icon.Imagen) {
-        issues.push({
-          screenUid: screen.uid,
-          screenIndex: compact.Index,
-          screenName,
-          buttonUid: String(i),
-          level: 'warning',
-          message: `Botón ${i + 1} sin texto ni imagen.`,
-        });
-      }
-      if (context && button.Text.Text) {
-        const font = button.Text.Font ?? { Size: 9, Family: 'Arial Black' };
-        const styles = parseFontStyles(font.FontStyle);
-        const prefix = `${styles.has('Italic') ? 'italic ' : ''}${styles.has('Bold') ? 'bold ' : ''}`;
-        context.font = `${prefix}${number(font.Size, 9) * 1.333}px ${font.Family || 'Arial Black'}`;
-        const width = context.measureText(button.Text.Text).width;
-        if (width > Math.max(20, w - 8)) {
-          issues.push({
-            screenUid: screen.uid,
-            screenIndex: compact.Index,
-            screenName,
-            buttonUid: String(i),
-            level: 'warning',
-            message: `“${button.Text.Text}” podría no caber en ${w.toFixed(0)} px.`,
-          });
-        }
-      }
-      for (const action of button.Actions ?? []) {
-        if (action.Type === 'gotoScreen' && !indexSet.has(number(action.Value))) {
-          issues.push({
-            screenUid: screen.uid,
-            screenIndex: compact.Index,
-            screenName,
-            buttonUid: String(i),
-            level: 'error',
-            message: `gotoScreen apunta a la pantalla inexistente ${action.Value}.`,
-          });
-        }
-        if (!ACTION_TYPES.includes(action.Type as any)) {
-          issues.push({
-            screenUid: screen.uid,
-            screenIndex: compact.Index,
-            screenName,
-            buttonUid: String(i),
-            level: 'warning',
-            message: `Acción desconocida: ${action.Type}.`,
-          });
-        }
-      }
-      for (let j = i + 1; j < buttons.length; j += 1) {
-        const other = buttons[j];
-        const ox = number(other.X);
-        const oy = number(other.Y);
-        const ow = number(other.Width);
-        const oh = number(other.Height);
-        if (x < ox + ow && x + w > ox && y < oy + oh && y + h > oy) {
-          issues.push({
-            screenUid: screen.uid,
-            screenIndex: compact.Index,
-            screenName,
-            buttonUid: String(i),
-            level: 'warning',
-            message: `“${button.Text.Text || i + 1}” se traslapa con “${other.Text.Text || j + 1}”.`,
-          });
+    const headerHeight = number(compact.Header?.Height);
+    for (const zone of ZONES) {
+      const zoneData = compact[zone] as Zone;
+      const zoneName = ZONE_LABELS[zone];
+      const prefix = zone === 'Body' ? '' : `${zoneName}: `;
+      // En 1280/1080 el cuerpo se recorta al área visible; con encabezado, cada zona a su alto.
+      const zoneHeight = number(zoneData.Height);
+      const limitHeight =
+        zone === 'Body'
+          ? profile.cajaOnly
+            ? Math.min(zoneHeight || profile.visibleHeight, profile.visibleHeight - headerHeight)
+            : profile.visibleHeight
+          : zoneHeight;
+      for (const kind of ['button', 'text'] as const) {
+        const elements = zoneElements(compact, zone, kind);
+        for (let i = 0; i < elements.length; i += 1) {
+          const button = kind === 'text' ? textAsButton(elements[i]) : (elements[i] as PdtdButton);
+          const x = number(button.X);
+          const y = number(button.Y);
+          const w = number(button.Width);
+          const h = number(button.Height);
+          const label = button.Text.Text || `${kind === 'text' ? 'Texto' : 'Botón'} ${i + 1}`;
+          const issueBase = { ...base, buttonUid: String(i), zone, kind };
+          const outside = Math.max(
+            -x,
+            -y,
+            x + w - profile.visibleWidth - 0.5,
+            y + h - limitHeight - (zone === 'Body' ? 0.5 : EDGE_TOLERANCE),
+          );
+          if (outside > 0 && (outside > EDGE_TOLERANCE || x + w > profile.visibleWidth + 0.5 || y + h > limitHeight + EDGE_TOLERANCE)) {
+            issues.push({
+              ...issueBase,
+              // Un recorte de pocos píxeles por arriba o por la izquierda es solo un aviso.
+              level: outside <= 20 && x >= -20 && y >= -20 && x + w <= profile.visibleWidth + 0.5 && y + h <= limitHeight + EDGE_TOLERANCE ? 'warning' : 'error',
+              message: `${prefix}“${label}” sale del área visible (${x.toFixed(0)}, ${y.toFixed(0)}, ${w.toFixed(0)}×${h.toFixed(0)}).`,
+            });
+          }
+          if (kind === 'button' && !button.Text.Text && !button.Icon.Imagen) {
+            issues.push({ ...issueBase, level: 'warning', message: `${prefix}Botón ${i + 1} sin texto ni imagen.` });
+          }
+          if (context && button.Text.Text) {
+            const font = button.Text.Font ?? { Size: 9, Family: 'Arial Black', FontStyle: '' };
+            const styles = parseFontStyles(font.FontStyle);
+            const fontPrefix = `${styles.has('Italic') ? 'italic ' : ''}${styles.has('Bold') ? 'bold ' : ''}`;
+            context.font = `${fontPrefix}${(number(font.Size, 9) || 9) * 1.333}px ${font.Family || 'Arial Black'}`;
+            const width = context.measureText(button.Text.Text).width;
+            if (width > Math.max(20, w - 8)) {
+              issues.push({
+                ...issueBase,
+                level: 'warning',
+                message: `${prefix}“${button.Text.Text}” podría no caber en ${w.toFixed(0)} px.`,
+              });
+            }
+          }
+          if (kind !== 'button') continue;
+          for (const action of button.Actions ?? []) {
+            const type = String(action.Type ?? '');
+            const missingValue = action.Value === undefined || action.Value === null || action.Value === '';
+            if (type !== 'executionOrder' && missingValue) {
+              issues.push({
+                ...issueBase,
+                level: 'warning',
+                message: `${prefix}“${label}” tiene la acción ${type} sin valor.`,
+              });
+            } else if (type === 'gotoScreen' && !indexSet.has(number(action.Value))) {
+              issues.push({
+                ...issueBase,
+                level: 'error',
+                message: `${prefix}gotoScreen apunta a la pantalla inexistente ${action.Value}.`,
+              });
+            }
+            if (!ACTION_TYPES.includes(type as any)) {
+              issues.push({ ...issueBase, level: 'warning', message: `${prefix}Acción desconocida: ${type}.` });
+            }
+          }
+          const buttons = elements as PdtdButton[];
+          for (let j = i + 1; j < buttons.length; j += 1) {
+            const other = buttons[j];
+            const ox = number(other.X);
+            const oy = number(other.Y);
+            const ow = number(other.Width);
+            const oh = number(other.Height);
+            if (x < ox + ow && x + w > ox && y < oy + oh && y + h > oy) {
+              issues.push({
+                ...issueBase,
+                level: 'warning',
+                message: `${prefix}“${button.Text.Text || i + 1}” se traslapa con “${other.Text.Text || j + 1}”.`,
+              });
+            }
+          }
         }
       }
     }

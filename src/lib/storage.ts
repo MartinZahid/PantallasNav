@@ -28,7 +28,10 @@ function parseStoredProject(raw: string): Project | null {
 export function loadLocalProject(): Project | null {
   try {
     const preferred = localStorage.getItem(LAST_PROFILE_KEY);
-    const profiles: ProfileId[] = preferred === '1080' ? ['1080', '1280'] : ['1280', '1080'];
+    const all: ProfileId[] = ['1280', '1080', '1024'];
+    const profiles: ProfileId[] = all.includes(preferred as ProfileId)
+      ? [preferred as ProfileId, ...all.filter((id) => id !== preferred)]
+      : all;
     for (const profileId of profiles) {
       const raw = localStorage.getItem(localKeyForProfile(profileId));
       if (!raw) continue;

@@ -93,7 +93,10 @@ export interface ProjectScreen {
   webRaw?: PdtdScreen;
 }
 
-export type ProfileId = '1280' | '1080';
+export type ProfileId = '1280' | '1080' | '1024';
+
+export type ZoneId = 'Header' | 'Body' | 'Footer';
+export type ElementKind = 'button' | 'text';
 
 export interface DesignProfile {
   id: ProfileId;
@@ -108,6 +111,8 @@ export interface DesignProfile {
   portalHeight: number;
   screenSize: string;
   originalScreenSize: string;
+  /** El plano solo se puede exportar como Caja y no admite conversión. */
+  cajaOnly?: boolean;
 }
 
 export interface Project {
@@ -119,6 +124,9 @@ export interface Project {
   products: Product[];
   selectedScreenUid: string | null;
   selectedButtonIndex: number | null;
+  /** Zona y tipo de lista a los que se refiere selectedButtonIndex. */
+  selectedZone?: ZoneId;
+  selectedKind?: ElementKind;
 }
 
 export type ViewMode = 'editor' | 'caja' | 'portal' | 'validate';
@@ -128,6 +136,8 @@ export interface ValidationIssue {
   screenIndex: number;
   screenName: string;
   buttonUid?: string;
+  zone?: ZoneId;
+  kind?: ElementKind;
   level: 'error' | 'warning';
   message: string;
 }

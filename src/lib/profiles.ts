@@ -29,19 +29,43 @@ export const PROFILES: Record<ProfileId, DesignProfile> = {
     screenSize: '1920×1080',
     originalScreenSize: '1920x1040',
   },
+  // Plano 1024 x 768: la navegación ocupa 614.4 px (60 %) y se reparte en
+  // Encabezado + Cuerpo + Pie. El área visible se deduce escalando el 1280 por 0.8.
+  '1024': {
+    id: '1024',
+    label: '1024 × 768',
+    short: '1024',
+    defaultName: 'Diseno 1024',
+    visibleWidth: 470.4,
+    visibleHeight: 674.4,
+    bodyWidth: 614.4,
+    bodyHeight: 768,
+    portalWidth: 1181,
+    portalHeight: 708,
+    screenSize: '1024×768',
+    originalScreenSize: '1024x768',
+    cajaOnly: true,
+  },
 };
 
 export const PROFILE_1280 = PROFILES['1280'];
 
 export function profileForId(id: ProfileId | string | undefined): DesignProfile {
-  return id === '1080' ? PROFILES['1080'] : PROFILES['1280'];
+  if (id === '1080') return PROFILES['1080'];
+  if (id === '1024') return PROFILES['1024'];
+  return PROFILES['1280'];
 }
 
 export function profileForProject(project: Project | null | undefined): DesignProfile {
   if (project?.profileId) return profileForId(project.profileId);
-  const body = project?.screens?.[0]?.compact?.Body;
-  if (Number(body?.Width) >= 1000) return PROFILES['1080'];
-  return PROFILES['1280'];
+  return PROFILES[profileFromBodyWidth(project?.screens?.[0]?.compact?.Body?.Width)];
+}
+
+function profileFromBodyWidth(value: unknown): ProfileId {
+  const width = Number(value);
+  if (width >= 1000) return '1080';
+  if (width > 0 && width < 700) return '1024';
+  return '1280';
 }
 
 function screenSizeOf(value: unknown): string {
@@ -52,12 +76,10 @@ export function profileFromWeb(data: Partial<WebDesign> | null | undefined): Pro
   const size = screenSizeOf(data?.ScreenSize);
   if (size.includes('1920') || size.includes('1080')) return '1080';
   const first = data?.Screens?.[0] as { Body?: { Width?: unknown } } | undefined;
-  if (Number(first?.Body?.Width) >= 1000) return '1080';
-  return '1280';
+  return profileFromBodyWidth(first?.Body?.Width);
 }
 
 export function profileFromCaja(data: unknown): ProfileId {
   const first = Array.isArray(data) ? (data[0] as { Body?: { Width?: unknown } } | undefined) : undefined;
-  if (Number(first?.Body?.Width) >= 1000) return '1080';
-  return '1280';
+  return profileFromBodyWidth(first?.Body?.Width);
 }

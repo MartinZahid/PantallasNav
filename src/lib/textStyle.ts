@@ -83,3 +83,42 @@ export function composeAlignment(
 ): string {
   return `${vertical}${horizontal}`;
 }
+
+/**
+ * Convierte un color de Point ("r,g,b" o "a,r,g,b" de .NET) a CSS.
+ * Un valor vacío o inválido devuelve `fallback`, sin modificar el dato original.
+ */
+export function cssColor(value: string | null | undefined, fallback = 'transparent'): string {
+  const source = String(value ?? '').trim();
+  if (!source) return fallback;
+  if (source.startsWith('#')) return source;
+  const parts = source.split(',').map((part) => Number(part.trim()));
+  if (parts.some((part) => !Number.isFinite(part))) return fallback;
+  if (parts.length === 3) return `rgb(${parts[0]}, ${parts[1]}, ${parts[2]})`;
+  if (parts.length === 4) {
+    const alpha = Math.max(0, Math.min(255, parts[0])) / 255;
+    return `rgba(${parts[1]}, ${parts[2]}, ${parts[3]}, ${Math.round(alpha * 1000) / 1000})`;
+  }
+  return fallback;
+}
+
+/** Devuelve un data URL para una imagen en base64, detectando el formato real. */
+export function imageDataUrl(value: string | null | undefined): string {
+  const clean = String(value ?? '').trim();
+  if (!clean) return '';
+  if (clean.startsWith('data:')) return clean;
+  const mime = clean.startsWith('/9j/')
+    ? 'image/jpeg'
+    : clean.startsWith('R0lGOD')
+      ? 'image/gif'
+      : clean.startsWith('UklGR')
+        ? 'image/webp'
+        : 'image/png';
+  return `data:${mime};base64,${clean}`;
+}
+
+/** Tamaño de fuente en px para dibujar; 0 o vacío usa el valor por defecto. */
+export function fontPixels(size: unknown, fallback = 9): number {
+  const value = Number(size);
+  return Math.max(7, Math.round((Number.isFinite(value) && value > 0 ? value : fallback) * 1.33));
+}
