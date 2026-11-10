@@ -150,6 +150,9 @@ export function compactFromWeb(screen: PdtdScreen, profile: DesignProfile = PROF
   };
 }
 
+/** Fuente por defecto de todo elemento nuevo. */
+export const DEFAULT_FONT = 'Arial Black';
+
 export const ZONES: ZoneId[] = ['Header', 'Body', 'Footer'];
 
 export const ZONE_LABELS: Record<ZoneId, string> = {
@@ -207,18 +210,18 @@ export function elementAsButton(
   return kind === 'text' ? textAsButton(item) : (item as PdtdButton);
 }
 
-/** Texto nuevo para `Texts` de una zona. */
+/** Texto nuevo para `Texts` de una zona, con el estilo por defecto del editor. */
 export function makeZoneText(text = 'TITULO', overrides: Record<string, Json> = {}): Json {
   return {
     Text: text,
     Color: '',
     BackColor: '',
-    TextAlign: 'BottomCenter',
-    Font: { Family: 'Courier New', Size: 20, FontStyle: '' },
-    X: 60,
+    TextAlign: 'MiddleCenter',
+    Font: { Family: DEFAULT_FONT, Size: 14, FontStyle: '' },
+    X: 0,
     Y: 0,
-    Width: 240,
-    Height: 60,
+    Width: 200,
+    Height: 40,
     ...overrides,
   };
 }
@@ -268,19 +271,24 @@ export function makeButton(text = 'BOTON', overrides: Partial<PdtdButton> = {}):
   });
 }
 
+/** Margen entre el borde del área visible y los elementos generados. */
+const EDGE = 8;
+
+/** Banner de título para el cuerpo, proporcional al área visible del plano. */
 export function makeTitle(text = 'NUEVA PANTALLA', profile: DesignProfile = PROFILE_1280): PdtdButton {
-  const width = Math.min(profile.visibleWidth - 48, profile.id === '1080' ? 760 : 499.8);
+  const width = Math.min(profile.visibleWidth - EDGE * 6, 760);
+  const height = Math.max(48, Math.min(91, Math.round(profile.visibleHeight * 0.108)));
   return makeButton(text, {
     X: Math.round(((profile.visibleWidth - width) / 2) * 10) / 10,
-    Y: 17,
+    Y: EDGE * 2,
     Width: width,
-    Height: 91,
+    Height: height,
     Text: {
       Text: text,
       Color: '255,255,255',
       BackColor: '120,120,120',
       TextAlign: 'BottomCenter',
-      Font: { Family: 'Arial Black', Size: 21, FontStyle: '' },
+      Font: { Family: DEFAULT_FONT, Size: Math.round(height * 0.23), FontStyle: '' },
       X: 0,
       Y: 0,
       Width: 0,
@@ -316,7 +324,7 @@ export function makeEmptyScreen(
   };
 }
 
-export const DEFAULT_HEADER: HeaderSettings = { enabled: true, height: 78 };
+export const DEFAULT_HEADER: HeaderSettings = { enabled: true, height: 80 };
 export const MIN_HEADER_HEIGHT = 30;
 export const MAX_HEADER_HEIGHT = 200;
 
@@ -336,37 +344,45 @@ export function headerDefaultsFor(project: Project | null | undefined): HeaderSe
   return { ...DEFAULT_HEADER };
 }
 
-/** Contenido base de un encabezado: inicio a la izquierda, título al centro y regresar a la derecha. */
-export function makeHeaderElements(title: string, height: number): { buttons: PdtdButton[]; texts: Json[] } {
-  const iconHeight = Math.max(20, height - 3);
-  const icon = (image: string, x: number, actions: Action[]): PdtdButton => ({
-    Text: {
-      Text: '',
-      Color: '',
-      BackColor: '',
-      TextAlign: '',
-      Font: { Family: '', Size: 12, FontStyle: '' },
-      X: 0,
-      Y: 0,
-      Width: 0,
-      Height: 0,
-    },
-    Icon: { Imagen: image, SizeMode: '', X: 0, Y: 0, Width: 0, Height: 0 },
-    Actions: actions,
-    X: x,
-    Y: 0,
-    Width: 43.2,
-    Height: iconHeight,
-  });
+/**
+ * Contenido base de un encabezado, colocado en proporción al área visible y al alto:
+ * inicio a la izquierda, título al centro y regresar a la derecha.
+ */
+export function makeHeaderElements(
+  title: string,
+  height: number,
+  profile: DesignProfile,
+): { buttons: PdtdButton[]; texts: Json[] } {
+  const side = Math.max(20, Math.min(72, Math.round(height - EDGE)));
+  const top = Math.max(0, Math.round((height - side) / 2));
+  const icon = (image: string, x: number, actions: Action[]): PdtdButton =>
+    makeButton('', {
+      Text: { ...makeButton('').Text, BackColor: '', Color: '' },
+      Icon: { Imagen: image, SizeMode: 'Zoom', X: 0, Y: 0, Width: 0, Height: 0 },
+      Actions: actions,
+      X: x,
+      Y: top,
+      Width: side,
+      Height: side,
+    });
+  const titleX = EDGE * 2 + side;
   return {
     buttons: [
-      icon(HEADER_ICON_BACK, 372.6, [{ Index: 1, Type: 'rewind', Value: true }]),
-      icon(HEADER_ICON_HOME, 7.8, [
+      icon(HEADER_ICON_HOME, EDGE, [
         { Index: 1, Type: 'finish', Value: false },
-        { Index: 1, Type: 'reset', Value: true },
+        { Index: 2, Type: 'reset', Value: true },
       ]),
+      icon(HEADER_ICON_BACK, profile.visibleWidth - EDGE - side, [{ Index: 1, Type: 'rewind', Value: true }]),
     ],
-    texts: [makeZoneText(title, { X: 73.2, Y: 0, Width: 268.8, Height: Math.max(20, height - 4) })],
+    texts: [
+      makeZoneText(title, {
+        X: titleX,
+        Y: 0,
+        Width: Math.max(40, profile.visibleWidth - titleX * 2),
+        Height: height,
+        Font: { Family: DEFAULT_FONT, Size: Math.max(10, Math.min(28, Math.round(height * 0.22))), FontStyle: '' },
+      }),
+    ],
   };
 }
 
@@ -385,7 +401,12 @@ export function fitHeaderElements(screen: PdtdScreen): void {
  * Activa, redimensiona o quita el encabezado de una pantalla conservando el alto total.
  * Al activarlo en una pantalla sin elementos de encabezado se agrega el contenido base.
  */
-export function setScreenHeader(screen: PdtdScreen, enabled: boolean, height: number): void {
+export function setScreenHeader(
+  screen: PdtdScreen,
+  enabled: boolean,
+  height: number,
+  profile: DesignProfile,
+): void {
   const header = screen.Header;
   const previous = Math.max(0, number(header.Height));
   const next = enabled ? clampHeaderHeight(height) : 0;
@@ -398,7 +419,7 @@ export function setScreenHeader(screen: PdtdScreen, enabled: boolean, height: nu
   }
   if (next < previous) fitHeaderElements(screen);
   if (!header.Buttons.length && !header.Texts.length) {
-    const base = makeHeaderElements(String(screen.Id ?? '').toUpperCase(), next);
+    const base = makeHeaderElements(String(screen.Id ?? '').toUpperCase(), next, profile);
     header.Buttons = base.buttons;
     header.Texts = base.texts;
   }
@@ -408,31 +429,30 @@ const TEMPLATE_GRIDS: Record<Exclude<TemplateId, 'blank'>, { cols: number; count
   grid3: { cols: 3, count: 9, label: 'BOTON' },
   grid2: { cols: 2, count: 4, label: 'CATEGORIA' },
   list20: { cols: 4, count: 20, label: 'PRODUCTO' },
-  grid30: { cols: 6, count: 30, label: 'GUISADO' },
+  grid30: { cols: 6, count: 30, label: 'BOTON' },
 };
 
-/** Plantillas para planos con zonas: la cuadrícula se calcula con el área visible del cuerpo. */
-function zonedTemplateButtons(
+/**
+ * Botones de una plantilla. Todo se calcula con el área visible del plano y el alto del
+ * encabezado: no hay medidas fijas por plano. Sin encabezado, el título va como banner.
+ */
+export function templateButtons(
   template: TemplateId,
-  title: string,
-  profile: DesignProfile,
-  headerHeight: number,
+  title = 'NUEVA PANTALLA',
+  profile: DesignProfile = PROFILE_1280,
+  headerHeight = 0,
 ): PdtdButton[] {
   const buttons: PdtdButton[] = [];
-  let top = 8;
+  const gap = EDGE;
+  let top = gap;
   if (headerHeight <= 0) {
-    // Sin encabezado, el título va como banner dentro del cuerpo.
     const banner = makeTitle(title, profile);
-    banner.Y = 8;
-    banner.Height = 60;
-    banner.Text.Font.Size = 18;
     buttons.push(banner);
-    top = 76;
+    top = Number(banner.Y) + Number(banner.Height) + gap;
   }
   if (template === 'blank') return buttons;
   const { cols, count, label } = TEMPLATE_GRIDS[template];
   const rows = Math.ceil(count / cols);
-  const gap = 8;
   const width = profile.visibleWidth - gap * 2;
   const height = profile.visibleHeight - headerHeight - top - gap;
   const side = Math.floor(
@@ -448,80 +468,9 @@ function zonedTemplateButtons(
         Y: top + Math.floor(i / cols) * (side + gap),
         Width: side,
         Height: side,
-        Text: { ...makeButton().Text, Text: text, Font: { Family: 'Arial Black', Size: fontSize, FontStyle: '' } },
+        Text: { ...makeButton().Text, Text: text, Font: { Family: DEFAULT_FONT, Size: fontSize, FontStyle: '' } },
       }),
     );
-  }
-  return buttons;
-}
-
-export function templateButtons(
-  template: TemplateId,
-  title = 'NUEVA PANTALLA',
-  profile: DesignProfile = PROFILE_1280,
-  headerHeight = 0,
-): PdtdButton[] {
-  if (profile.cajaOnly) return zonedTemplateButtons(template, title, profile, headerHeight);
-  const buttons: PdtdButton[] = [makeTitle(title, profile)];
-  if (template === 'blank') return buttons;
-  if (template === 'grid3') {
-    for (let i = 0; i < 9; i += 1) {
-      buttons.push(
-        makeButton(`BOTON ${i + 1}`, {
-          X: 14 + (i % 3) * 190,
-          Y: 118 + Math.floor(i / 3) * 190,
-          Width: 180,
-          Height: 180,
-        }),
-      );
-    }
-  }
-  if (template === 'grid2') {
-    for (let i = 0; i < 4; i += 1) {
-      buttons.push(
-        makeButton(`CATEGORIA ${i + 1}`, {
-          X: 9 + (i % 2) * 290,
-          Y: 118 + Math.floor(i / 2) * 290,
-          Width: 280,
-          Height: 280,
-        }),
-      );
-    }
-  }
-  if (template === 'list20') {
-    for (let i = 0; i < 20; i += 1) {
-      buttons.push(
-        makeButton(`PRODUCTO ${i + 1}`, {
-          X: 9 + (i % 4) * 145,
-          Y: 118 + Math.floor(i / 4) * 145,
-          Width: 135,
-          Height: 135,
-          Text: { ...makeButton().Text, Text: `PRODUCTO ${i + 1}`, Font: { Family: 'Arial Black', Size: 8, FontStyle: '' } },
-        }),
-      );
-    }
-  }
-  if (template === 'grid30') {
-    for (let i = 0; i < 30; i += 1) {
-      buttons.push(
-        makeButton(`GUISADO ${i + 1}`, {
-          X: 4 + (i % 6) * 98,
-          Y: 118 + Math.floor(i / 6) * 100,
-          Width: 90,
-          Height: 90,
-          Text: { ...makeButton().Text, Text: `GUISADO ${i + 1}`, Font: { Family: 'Arial Black', Size: 8, FontStyle: '' } },
-        }),
-      );
-    }
-  }
-  if (profile.id !== '1280' && buttons.length > 1) {
-    const rest = buttons.slice(1);
-    const minX = Math.min(...rest.map((button) => Number(button.X)));
-    const maxX = Math.max(...rest.map((button) => Number(button.X) + Number(button.Width)));
-    const shift = Math.round((profile.visibleWidth - (maxX - minX)) / 2 - minX);
-    rest.forEach((button) => {
-      button.X = Number(button.X) + shift;
-    });
   }
   return buttons;
 }
@@ -536,8 +485,8 @@ export function makeScreenFromTemplate(
   const screen = makeEmptyScreen(index, `Pantalla${index}`, profile);
   const headerHeight = profile.cajaOnly && header?.enabled ? clampHeaderHeight(header.height) : 0;
   if (headerHeight > 0) {
-    setScreenHeader(screen, true, headerHeight);
-    const base = makeHeaderElements(title, headerHeight);
+    setScreenHeader(screen, true, headerHeight, profile);
+    const base = makeHeaderElements(title, headerHeight, profile);
     screen.Header.Buttons = base.buttons;
     screen.Header.Texts = base.texts;
   }

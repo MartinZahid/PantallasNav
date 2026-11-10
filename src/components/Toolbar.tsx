@@ -214,13 +214,18 @@ export function Toolbar() {
       {pendingNewProfile && !isPreview ? (
         <div className="preview-bar">
           <span>
-            <strong>¿Crear un proyecto {PROFILES[pendingNewProfile].label} nuevo?</strong>{' '}
-            {pendingNewProfile !== profile.id
-              ? 'Entre este plano y el actual no hay conversión. '
-              : ''}
-            El proyecto actual se descarta; exporta antes si quieres conservarlo.
+            <strong>¿Crear un proyecto nuevo?</strong> El proyecto actual se descarta; exporta antes si quieres conservarlo. Elige el plano:
           </span>
-          <button type="button" className="primary-button" onClick={() => newProject(pendingNewProfile)}>Crear proyecto {PROFILES[pendingNewProfile].short}</button>
+          {(['1280', '1080', '1024'] as ProfileId[]).map((id) => (
+            <button
+              type="button"
+              key={id}
+              className={id === pendingNewProfile ? 'primary-button' : 'ghost-button'}
+              onClick={() => newProject(id)}
+            >
+              Nuevo {PROFILES[id].short}
+            </button>
+          ))}
           <button type="button" className="ghost-button" onClick={() => requestNewProject(null)}>Cancelar</button>
         </div>
       ) : null}

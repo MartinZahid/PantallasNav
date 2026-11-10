@@ -1,6 +1,6 @@
 # Editor de Pantallas Point POS
 
-Editor local para crear y modificar pantallas de Point POS en dos perfiles de resoluci?n: **1280 ? 1024** y **1920 ? 1080**. Genera los archivos `.pdtd` de **Web** (para importar en el portal de Point) y **Caja** (para cargar directamente en el POS).
+Editor local para crear y modificar pantallas de Point POS en tres planos: **1280 × 1024**, **1920 × 1080** y **1024 × 768**. Genera los archivos `.pdtd` de **Web** (para importar en el portal de Point) y **Caja** (para cargar directamente en el POS).
 
 ## Requisitos
 
@@ -40,31 +40,22 @@ Al cambiar el selector de plano:
 
 La conversi?n reacomoda los botones en cuadr?culas cuadradas dentro del ?rea visible, conserva t?tulos, textos, colores, fuentes, acciones e im?genes, y actualiza las vistas de **Caja** y **Portal**. La exportaci?n queda deshabilitada hasta convertir la vista previa.
 
-### Plano 1024 × 768 (solo Caja)
+### Plano 1024 × 768
 
-El plano **1024 × 768** se elige en el selector de plano (crea un proyecto nuevo) o se detecta al importar una Caja cuyo ancho de zona es 614.4. Estas pantallas se reparten en tres zonas apiladas:
+- Las pantallas se reparten en tres zonas apiladas: **Encabezado**, **Cuerpo** y **Pie**. Las coordenadas de cada elemento son relativas a su zona.
+- El **encabezado es opcional**: se activa o se quita por pantalla, se elige su alto (30 a 200 px) y se puede aplicar a todas las pantallas. Al activarlo se agregan el título y los iconos de inicio y regresar, colocados en proporción al alto.
+- Se convierte desde y hacia 1280 y 1080 con vista previa, igual que entre esos dos planos.
+- Por ahora exporta solo **Caja**; el archivo Web de este plano está pendiente.
 
-- **Encabezado**: título de la pantalla (`Header.Texts`) e iconos de regresar / terminar (`Header.Buttons`).
-- **Cuerpo**: los botones de producto y navegación.
-- **Pie**: opcional.
+## Reglas
 
-En este plano:
-
-- Los elementos del encabezado se seleccionan, mueven, redimensionan y editan igual que los del cuerpo; sus coordenadas son relativas a su zona.
-- El alto y el fondo del encabezado y del pie se cambian desde las propiedades de la pantalla; el cuerpo se ajusta para conservar el alto total.
-- La vista **Caja** simula `gotoScreen`, `rewind` (regresar) y `reset` (volver a la primera pantalla).
-- Solo se exporta **Caja**: no hay archivo Web ni conversión a 1280 / 1080. Una Caja importada y exportada sin cambios queda idéntica a la original.
-- Los colores, fuentes y tamaños vacíos del archivo se respetan (botones solo-imagen); el editor solo usa valores por defecto para dibujar.
-- El **encabezado es opcional**: se activa o se quita por pantalla, se elige su alto (30 a 200 px) y se puede aplicar el mismo a todas las pantallas. Al activarlo se agregan el título y los iconos de inicio y regresar; el diálogo de nueva pantalla recuerda la última elección.
-- La vista **Caja** dibuja como el POS: escala 1:1, sin bordes, y las imágenes con ajuste vacío o "Zoom" se muestran sin deformar y centradas (solo "Strech" estira).
-- El área visible (494 × 587) está medida sobre una captura real de la Caja: la navegación empieza en x = 530, y = 56 de la pantalla de 1024 × 768.
-- Entre 1024 y 1280 / 1080 no hay conversión: al cambiar de plano se ofrece crear un proyecto nuevo.
+Lo que la aplicación hace y debe respetar está en [REGLAS.md](REGLAS.md).
 
 ## Funciones principales
 
 - Importar archivos Web o Caja existentes; el perfil se detecta autom?ticamente.
 - Crear, duplicar, eliminar y reordenar pantallas.
-- Plantillas: vac?a, cuadr?cula 3?3, categor?as 2?2, lista 4?5 y guisados 6?5.
+- Plantillas: vac?a, cuadr?cula 3?3, categor?as 2?2, lista 4?5 y compacta 6×5.
 - Mover y redimensionar botones con im?n, gu?as de alineaci?n y cuadr?cula.
 - Editar texto, fuente, colores, fondo, alineaci?n e imagen.
 - Acciones: `addProduct`, `gotoScreen`, `selectProduct`, `addToList`, `executionOrder`, `finish`, `reset`, `deselectProduct`, `rewind`, `popUp` y `listFlush`.

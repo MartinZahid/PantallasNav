@@ -6,11 +6,11 @@ import { profileForProject } from '../lib/profiles';
 import { useEditor } from '../store';
 
 const TEMPLATES: { id: TemplateId; name: string; description: string; preview: string }[] = [
-  { id: 'blank', name: 'Pantalla vacía', description: 'Solo el título. Construye desde cero.', preview: 'blank' },
-  { id: 'grid3', name: 'Cuadrícula 3×3', description: '9 botones de 180×180.', preview: 'grid3' },
-  { id: 'grid2', name: 'Categorías 2×2', description: '4 botones grandes de 280×280.', preview: 'grid2' },
-  { id: 'list20', name: 'Lista 4×5', description: '20 botones de producto de 135×135.', preview: 'list20' },
-  { id: 'grid30', name: 'Guisados 6×5', description: '30 botones compactos de 90×90.', preview: 'grid30' },
+  { id: 'blank', name: 'Pantalla vacía', description: 'Solo el título o el encabezado. Construye desde cero.', preview: 'blank' },
+  { id: 'grid3', name: 'Cuadrícula 3×3', description: '9 botones cuadrados en tres columnas.', preview: 'grid3' },
+  { id: 'grid2', name: 'Categorías 2×2', description: '4 botones grandes en dos columnas.', preview: 'grid2' },
+  { id: 'list20', name: 'Lista 4×5', description: '20 botones de producto en cuatro columnas.', preview: 'list20' },
+  { id: 'grid30', name: 'Compacta 6×5', description: '30 botones compactos en seis columnas.', preview: 'grid30' },
 ];
 
 function TemplatesDialog({ screenCount, onClose }: { screenCount: number; onClose: () => void }) {

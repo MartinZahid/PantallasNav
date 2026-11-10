@@ -147,7 +147,7 @@ function gotoScreenTarget(button: PdtdButton): number | null {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function buttonStyle(button: PdtdButton, selected: boolean, editable: boolean, navigable: boolean, mode: CanvasMode): React.CSSProperties {
+function buttonStyle(button: PdtdButton, selected: boolean, editable: boolean, navigable: boolean): React.CSSProperties {
   const image = String(button.Icon?.Imagen ?? '');
   return {
     left: Number(button.X),
@@ -162,8 +162,8 @@ function buttonStyle(button: PdtdButton, selected: boolean, editable: boolean, n
     fontFamily: button.Text?.Font?.Family || 'Arial Black',
     fontSize: parseFontSize(button),
     ...fontCss(button.Text?.Font?.FontStyle),
-    // La Caja no dibuja bordes; el contorno solo ayuda a editar.
-    outline: selected ? '3px solid #f4511e' : mode === 'caja' ? 'none' : '1px solid rgba(0,0,0,0.16)',
+    // La Caja no dibuja bordes: el lienzo tampoco. Las ayudas de edición salen al pasar el cursor.
+    outline: selected ? '3px solid #f4511e' : 'none',
     cursor: editable ? 'move' : navigable ? 'pointer' : 'default',
     border: '0',
   };
@@ -207,8 +207,8 @@ function ButtonView({
   const index = Number(button.__index ?? -1);
   return (
     <div
-      className={`canvas-button ${selected ? 'selected' : ''} ${editing ? 'editing' : ''} ${magnetic ? 'magnetic' : ''} ${navigable ? 'navigable' : ''} ${isTitle(button) ? 'title' : ''} ${plainText ? 'zone-text' : ''}`}
-      style={buttonStyle(button, selected, editable, navigable, mode)}
+      className={`canvas-button ${selected ? 'selected' : ''} ${editing ? 'editing' : ''} ${magnetic ? 'magnetic' : ''} ${navigable ? 'navigable' : ''} ${isTitle(button) ? 'title' : ''} ${plainText ? 'zone-text' : ''} ${editable ? 'editable' : ''} ${editable && isBlank(button) ? 'blank' : ''}`}
+      style={buttonStyle(button, selected, editable, navigable)}
       title={navigable ? navigationTitle : undefined}
       onPointerDown={(event) => {
         if (!editable || editing) return;
@@ -236,7 +236,7 @@ function ButtonView({
         />
       ) : (
         <span className="canvas-label" style={{ ...alignmentStyle(button), ...fontCss(button.Text?.Font?.FontStyle) }}>
-          {button.Text?.Text || (editable && !button.Icon?.Imagen ? <em>SIN TEXTO</em> : '')}
+          {button.Text?.Text}
         </span>
       )}
       {editable && selected && !editing
@@ -252,6 +252,11 @@ function ButtonView({
       {mode === 'editor' && imageBadge(button)}
     </div>
   );
+}
+
+/** Elemento que la Caja no dibujaría: sin texto, sin imagen y sin fondo. */
+function isBlank(button: PdtdButton): boolean {
+  return !button.Text?.Text && !button.Icon?.Imagen && !String(button.Text?.BackColor ?? '').trim();
 }
 
 function imageBadge(button: PdtdButton): React.ReactNode {
@@ -636,14 +641,14 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
             return (
               <div
                 key={zone}
-                className={`screen-zone zone-${zone.toLowerCase()} ${zoned && mode === 'editor' ? 'zoned' : ''} ${zoned && mode === 'caja' ? 'clip' : ''}`}
+                className={`screen-zone zone-${zone.toLowerCase()} ${zoned && mode === 'editor' && showGrid ? 'zoned' : ''} ${zoned && mode === 'caja' ? 'clip' : ''}`}
                 style={{
                   top: offsets[zone],
                   height,
                   backgroundColor: zone === 'Body' ? undefined : cssColor(data.BackColor, 'transparent'),
                 }}
               >
-                {zoned && mode === 'editor' ? <span className="zone-tag">{ZONE_LABELS[zone]}</span> : null}
+                {zoned && mode === 'editor' && showGrid ? <span className="zone-tag">{ZONE_LABELS[zone]}</span> : null}
                 {renderElements(zone, 'text')}
                 {renderElements(zone, 'button')}
                 {renderGuides(zone)}

@@ -132,7 +132,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   view: 'editor',
   scale: 0.9,
   snap: true,
-  showGrid: true,
+  showGrid: false,
   message: null,
   templateOpen: false,
   productsOpen: false,
@@ -164,11 +164,6 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!source) return;
     if (profileForProject(source).id === profileId) {
       set({ previewProject: null, message: 'Vista previa cancelada.' });
-      return;
-    }
-    if (profileForProject(source).cajaOnly || profileForId(profileId).cajaOnly) {
-      // No hay conversión con el plano 1024: se ofrece empezar un proyecto nuevo en ese plano.
-      set({ previewProject: null, pendingNewProfile: profileId });
       return;
     }
     const previewProject = convertProjectProfile(source, profileId);
@@ -405,14 +400,20 @@ export const useEditor = create<EditorState>((set, get) => ({
     const zoneHeight = Math.max(20, Number(zoneData.Height) || 70);
     const list = zoneElements(screen.compact, zone, kind);
     if (kind === 'text') {
-      list.push(makeZoneText(screen.compact.Id.toUpperCase(), { Height: Math.min(60, zoneHeight) }));
+      list.push(
+        makeZoneText(screen.compact.Id.toUpperCase(), {
+          X: Math.round(profileForProject(project).visibleWidth / 4),
+          Width: Math.round(profileForProject(project).visibleWidth / 2),
+          Height: zoneHeight,
+        }),
+      );
     } else {
       const side = zone === 'Body' ? 100 : Math.min(60, zoneHeight);
       list.push(
         makeButton('', {
           X: 8 + (list.length % 5) * 12,
           Y: 0,
-          Width: zone === 'Body' ? side : 43.2,
+          Width: side,
           Height: side,
         }),
       );
@@ -476,7 +477,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!project || get().previewProject) return;
     const copy = screenCopy(project, screenUid);
     if (!copy) return;
-    setScreenHeader(copy.screen.compact, enabled, height);
+    setScreenHeader(copy.screen.compact, enabled, height, profileForProject(project));
     const next: Project = {
       ...copy.project,
       selectedButtonIndex: null,
@@ -513,7 +514,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const project = get().project;
     if (!project || get().previewProject) return;
     const next = clone(project);
-    for (const screen of next.screens) setScreenHeader(screen.compact, enabled, height);
+    for (const screen of next.screens) setScreenHeader(screen.compact, enabled, height, profileForProject(project));
     next.selectedButtonIndex = null;
     next.selectedZone = 'Body';
     next.selectedKind = 'button';
