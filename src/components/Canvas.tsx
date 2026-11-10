@@ -4,7 +4,7 @@ import { ZONES, ZONE_LABELS, elementAsButton, hasZone, isTitle, textAsButton, zo
 import { profileForProject } from '../lib/profiles';
 import type { ActiveSnap, SnapRect } from '../lib/snapping';
 import { snapEdge, snapMove } from '../lib/snapping';
-import { cssColor, fontCss, fontPixels, imageDataUrl, splitAlignment } from '../lib/textStyle';
+import { DEFAULT_TEXT_COLOR, cssColor, fontCss, fontPixels, imageDataUrl, imageFit, splitAlignment } from '../lib/textStyle';
 import { useEditor } from '../store';
 
 type CanvasMode = 'editor' | 'caja' | 'portal';
@@ -147,7 +147,7 @@ function gotoScreenTarget(button: PdtdButton): number | null {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function buttonStyle(button: PdtdButton, selected: boolean, editable: boolean, navigable: boolean): React.CSSProperties {
+function buttonStyle(button: PdtdButton, selected: boolean, editable: boolean, navigable: boolean, mode: CanvasMode): React.CSSProperties {
   const image = String(button.Icon?.Imagen ?? '');
   return {
     left: Number(button.X),
@@ -155,14 +155,15 @@ function buttonStyle(button: PdtdButton, selected: boolean, editable: boolean, n
     width: Number(button.Width),
     height: Number(button.Height),
     backgroundColor: cssColor(button.Text?.BackColor ?? '0,0,0', 'transparent'),
-    color: cssColor(button.Text?.Color ?? '255,255,255', 'rgb(0, 0, 0)'),
+    color: cssColor(button.Text?.Color ?? '255,255,255', DEFAULT_TEXT_COLOR),
     backgroundImage: image ? `url(${imageDataUrl(image)})` : undefined,
-    backgroundSize: '100% 100%',
+    ...imageFit(button.Icon?.SizeMode),
     backgroundRepeat: 'no-repeat',
     fontFamily: button.Text?.Font?.Family || 'Arial Black',
     fontSize: parseFontSize(button),
     ...fontCss(button.Text?.Font?.FontStyle),
-    outline: selected ? '3px solid #f4511e' : '1px solid rgba(0,0,0,0.16)',
+    // La Caja no dibuja bordes; el contorno solo ayuda a editar.
+    outline: selected ? '3px solid #f4511e' : mode === 'caja' ? 'none' : '1px solid rgba(0,0,0,0.16)',
     cursor: editable ? 'move' : navigable ? 'pointer' : 'default',
     border: '0',
   };
@@ -175,6 +176,7 @@ function ButtonView({
   editing,
   navigable,
   navigationTitle,
+  plainText,
   mode,
   magnetic,
   onPointerDown,
@@ -191,6 +193,7 @@ function ButtonView({
   editing: boolean;
   navigable: boolean;
   navigationTitle?: string;
+  plainText?: boolean;
   mode: CanvasMode;
   magnetic: boolean;
   onPointerDown: (event: React.PointerEvent, index: number) => void;
@@ -204,8 +207,8 @@ function ButtonView({
   const index = Number(button.__index ?? -1);
   return (
     <div
-      className={`canvas-button ${selected ? 'selected' : ''} ${editing ? 'editing' : ''} ${magnetic ? 'magnetic' : ''} ${navigable ? 'navigable' : ''} ${isTitle(button) ? 'title' : ''}`}
-      style={buttonStyle(button, selected, editable, navigable)}
+      className={`canvas-button ${selected ? 'selected' : ''} ${editing ? 'editing' : ''} ${magnetic ? 'magnetic' : ''} ${navigable ? 'navigable' : ''} ${isTitle(button) ? 'title' : ''} ${plainText ? 'zone-text' : ''}`}
+      style={buttonStyle(button, selected, editable, navigable, mode)}
       title={navigable ? navigationTitle : undefined}
       onPointerDown={(event) => {
         if (!editable || editing) return;
@@ -544,7 +547,7 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
                   width: w,
                   height: h,
                   backgroundColor: cssColor(button.Text?.BackColor ?? '0,0,0', 'transparent'),
-                  color: cssColor(button.Text?.Color ?? '255,255,255', 'rgb(0, 0, 0)'),
+                  color: cssColor(button.Text?.Color ?? '255,255,255', DEFAULT_TEXT_COLOR),
                   fontFamily: button.Text?.Font?.Family || 'Arial Black',
                   fontSize: fontPixels(button.Text?.Font?.Size),
                   ...fontCss(button.Text?.Font?.FontStyle),
@@ -581,6 +584,7 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
           editing={mode === 'editor' && !preview && sameRef(editing, ref)}
           navigable={navigation !== null}
           navigationTitle={describeNavigation(navigation)}
+          plainText={kind === 'text'}
           mode={mode}
           magnetic={mode === 'editor' && Boolean(dragging) && magnetic.has(index)}
           onPointerDown={(event) => startMove(event, ref)}
@@ -632,7 +636,7 @@ export function Canvas({ mode }: { mode: CanvasMode }) {
             return (
               <div
                 key={zone}
-                className={`screen-zone zone-${zone.toLowerCase()} ${zoned ? 'zoned' : ''} ${zoned && mode === 'caja' ? 'clip' : ''}`}
+                className={`screen-zone zone-${zone.toLowerCase()} ${zoned && mode === 'editor' ? 'zoned' : ''} ${zoned && mode === 'caja' ? 'clip' : ''}`}
                 style={{
                   top: offsets[zone],
                   height,

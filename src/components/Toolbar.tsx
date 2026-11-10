@@ -73,12 +73,11 @@ export function Toolbar() {
   const webInput = useRef<HTMLInputElement>(null);
   const cajaInput = useRef<HTMLInputElement>(null);
 
-  const createNewProject = () => {
-    const target = profile.id;
-    if (window.confirm(`¿Crear un proyecto ${target === '1080' ? '1080' : '1280'} nuevo y descartar el actual?`)) {
-      newProject(target);
-    }
-  };
+  const pendingNewProfile = useEditor((state) => state.pendingNewProfile);
+  const requestNewProject = useEditor((state) => state.requestNewProject);
+  const createNewProject = () => requestNewProject(profile.id);
+  const tabs = profile.cajaOnly ? TABS.filter((tab) => tab.id !== 'portal') : TABS;
+  const currentView = profile.cajaOnly && view === 'portal' ? 'editor' : view;
 
   return (
     <>
@@ -133,15 +132,11 @@ export function Toolbar() {
           </button>
 
           <div className="radio-group" role="radiogroup" aria-label="Plano de trabajo">
-            {(profile.cajaOnly ? (['1024'] as ProfileId[]) : (['1280', '1080'] as ProfileId[])).map((id) => (
+            {(['1280', '1080', '1024'] as ProfileId[]).map((id) => (
               <label
                 key={id}
                 className={`radio-option ${profile.id === id ? 'checked' : ''}`}
-                title={
-                  profile.cajaOnly
-                    ? 'Plano 1024 × 768: se edita tal cual y se exporta como Caja.'
-                    : `${PROFILES[id].visibleWidth}x${PROFILES[id].visibleHeight}`
-                }
+                title={`${PROFILES[id].label} · área visible ${PROFILES[id].visibleWidth}x${PROFILES[id].visibleHeight}${PROFILES[id].cajaOnly ? ' · solo Caja' : ''}`}
               >
                 <input
                   type="radio"
@@ -155,10 +150,10 @@ export function Toolbar() {
           </div>
 
           <div className="tabs view-tabs">
-            {TABS.map((tab) => (
+            {tabs.map((tab) => (
               <button
                 type="button"
-                className={`tab ${view === tab.id ? 'active' : ''}`}
+                className={`tab ${currentView === tab.id ? 'active' : ''}`}
                 key={tab.id}
                 onClick={() => setView(tab.id)}
               >
@@ -214,6 +209,19 @@ export function Toolbar() {
           </span>
           <button type="button" className="primary-button" onClick={() => { if (window.confirm('¿Convertir el diseño al plano seleccionado? Se reacomodarán todas las pantallas.')) applyPreview(); }}>Convertir diseño</button>
           <button type="button" className="ghost-button" onClick={cancelPreview}>Cancelar</button>
+        </div>
+      ) : null}
+      {pendingNewProfile && !isPreview ? (
+        <div className="preview-bar">
+          <span>
+            <strong>¿Crear un proyecto {PROFILES[pendingNewProfile].label} nuevo?</strong>{' '}
+            {pendingNewProfile !== profile.id
+              ? 'Entre este plano y el actual no hay conversión. '
+              : ''}
+            El proyecto actual se descarta; exporta antes si quieres conservarlo.
+          </span>
+          <button type="button" className="primary-button" onClick={() => newProject(pendingNewProfile)}>Crear proyecto {PROFILES[pendingNewProfile].short}</button>
+          <button type="button" className="ghost-button" onClick={() => requestNewProject(null)}>Cancelar</button>
         </div>
       ) : null}
       {message ? (

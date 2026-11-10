@@ -29,15 +29,16 @@ export const PROFILES: Record<ProfileId, DesignProfile> = {
     screenSize: '1920×1080',
     originalScreenSize: '1920x1040',
   },
-  // Plano 1024 x 768: la navegación ocupa 614.4 px (60 %) y se reparte en
-  // Encabezado + Cuerpo + Pie. El área visible se deduce escalando el 1280 por 0.8.
+  // Plano 1024 x 768: el archivo declara zonas de 614.4 px (60 %) repartidas en
+  // Encabezado + Cuerpo + Pie. El área visible está medida en una Caja real: la
+  // navegación se dibuja 1:1 desde x = 530 hasta el borde derecho y hasta la barra inferior.
   '1024': {
     id: '1024',
     label: '1024 × 768',
     short: '1024',
     defaultName: 'Diseno 1024',
-    visibleWidth: 470.4,
-    visibleHeight: 674.4,
+    visibleWidth: 494,
+    visibleHeight: 587,
     bodyWidth: 614.4,
     bodyHeight: 768,
     portalWidth: 1181,

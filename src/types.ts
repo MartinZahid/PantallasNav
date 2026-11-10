@@ -127,6 +127,13 @@ export interface Project {
   /** Zona y tipo de lista a los que se refiere selectedButtonIndex. */
   selectedZone?: ZoneId;
   selectedKind?: ElementKind;
+  /** Encabezado que reciben las pantallas nuevas (planos con zonas, como 1024). */
+  headerDefaults?: HeaderSettings;
+}
+
+export interface HeaderSettings {
+  enabled: boolean;
+  height: number;
 }
 
 export type ViewMode = 'editor' | 'caja' | 'portal' | 'validate';

@@ -13,7 +13,9 @@ import type {
   Zone,
   ZoneId,
   ElementKind,
+  HeaderSettings,
 } from '../types';
+import { HEADER_ICON_BACK, HEADER_ICON_HOME } from './headerIcons';
 import {
   PROFILE_1280,
   profileForId,
@@ -314,11 +316,152 @@ export function makeEmptyScreen(
   };
 }
 
+export const DEFAULT_HEADER: HeaderSettings = { enabled: true, height: 78 };
+export const MIN_HEADER_HEIGHT = 30;
+export const MAX_HEADER_HEIGHT = 200;
+
+export function clampHeaderHeight(value: unknown): number {
+  const height = number(value, DEFAULT_HEADER.height);
+  return Math.max(MIN_HEADER_HEIGHT, Math.min(MAX_HEADER_HEIGHT, Math.round(height * 10) / 10));
+}
+
+/** Encabezado para pantallas nuevas del proyecto; solo aplica a planos con zonas. */
+export function headerDefaultsFor(project: Project | null | undefined): HeaderSettings {
+  if (!profileForProject(project).cajaOnly) return { enabled: false, height: DEFAULT_HEADER.height };
+  const stored = project?.headerDefaults;
+  if (stored) return { enabled: Boolean(stored.enabled), height: clampHeaderHeight(stored.height) };
+  const first = project?.screens?.[0]?.compact;
+  const height = number(first?.Header?.Height);
+  if (first) return { enabled: height > 0, height: height > 0 ? clampHeaderHeight(height) : DEFAULT_HEADER.height };
+  return { ...DEFAULT_HEADER };
+}
+
+/** Contenido base de un encabezado: inicio a la izquierda, título al centro y regresar a la derecha. */
+export function makeHeaderElements(title: string, height: number): { buttons: PdtdButton[]; texts: Json[] } {
+  const iconHeight = Math.max(20, height - 3);
+  const icon = (image: string, x: number, actions: Action[]): PdtdButton => ({
+    Text: {
+      Text: '',
+      Color: '',
+      BackColor: '',
+      TextAlign: '',
+      Font: { Family: '', Size: 12, FontStyle: '' },
+      X: 0,
+      Y: 0,
+      Width: 0,
+      Height: 0,
+    },
+    Icon: { Imagen: image, SizeMode: '', X: 0, Y: 0, Width: 0, Height: 0 },
+    Actions: actions,
+    X: x,
+    Y: 0,
+    Width: 43.2,
+    Height: iconHeight,
+  });
+  return {
+    buttons: [
+      icon(HEADER_ICON_BACK, 372.6, [{ Index: 1, Type: 'rewind', Value: true }]),
+      icon(HEADER_ICON_HOME, 7.8, [
+        { Index: 1, Type: 'finish', Value: false },
+        { Index: 1, Type: 'reset', Value: true },
+      ]),
+    ],
+    texts: [makeZoneText(title, { X: 73.2, Y: 0, Width: 268.8, Height: Math.max(20, height - 4) })],
+  };
+}
+
+/** Recorta los elementos del encabezado que sobresalen de su alto actual. */
+export function fitHeaderElements(screen: PdtdScreen): void {
+  const header = screen.Header;
+  const limit = number(header.Height);
+  if (limit <= 0) return;
+  for (const item of [...header.Buttons, ...header.Texts] as { Y: number; Height: number }[]) {
+    const top = Math.max(0, number(item.Y));
+    if (top + number(item.Height) > limit) item.Height = Math.max(10, Math.round((limit - top) * 10) / 10);
+  }
+}
+
+/**
+ * Activa, redimensiona o quita el encabezado de una pantalla conservando el alto total.
+ * Al activarlo en una pantalla sin elementos de encabezado se agrega el contenido base.
+ */
+export function setScreenHeader(screen: PdtdScreen, enabled: boolean, height: number): void {
+  const header = screen.Header;
+  const previous = Math.max(0, number(header.Height));
+  const next = enabled ? clampHeaderHeight(height) : 0;
+  header.Height = next;
+  screen.Body.Height = Math.max(20, Math.round((number(screen.Body.Height) + previous - next) * 100) / 100);
+  if (!enabled) {
+    header.Buttons = [];
+    header.Texts = [];
+    return;
+  }
+  if (next < previous) fitHeaderElements(screen);
+  if (!header.Buttons.length && !header.Texts.length) {
+    const base = makeHeaderElements(String(screen.Id ?? '').toUpperCase(), next);
+    header.Buttons = base.buttons;
+    header.Texts = base.texts;
+  }
+}
+
+const TEMPLATE_GRIDS: Record<Exclude<TemplateId, 'blank'>, { cols: number; count: number; label: string }> = {
+  grid3: { cols: 3, count: 9, label: 'BOTON' },
+  grid2: { cols: 2, count: 4, label: 'CATEGORIA' },
+  list20: { cols: 4, count: 20, label: 'PRODUCTO' },
+  grid30: { cols: 6, count: 30, label: 'GUISADO' },
+};
+
+/** Plantillas para planos con zonas: la cuadrícula se calcula con el área visible del cuerpo. */
+function zonedTemplateButtons(
+  template: TemplateId,
+  title: string,
+  profile: DesignProfile,
+  headerHeight: number,
+): PdtdButton[] {
+  const buttons: PdtdButton[] = [];
+  let top = 8;
+  if (headerHeight <= 0) {
+    // Sin encabezado, el título va como banner dentro del cuerpo.
+    const banner = makeTitle(title, profile);
+    banner.Y = 8;
+    banner.Height = 60;
+    banner.Text.Font.Size = 18;
+    buttons.push(banner);
+    top = 76;
+  }
+  if (template === 'blank') return buttons;
+  const { cols, count, label } = TEMPLATE_GRIDS[template];
+  const rows = Math.ceil(count / cols);
+  const gap = 8;
+  const width = profile.visibleWidth - gap * 2;
+  const height = profile.visibleHeight - headerHeight - top - gap;
+  const side = Math.floor(
+    Math.max(30, Math.min((width - gap * (cols - 1)) / cols, (height - gap * (rows - 1)) / rows)),
+  );
+  const x0 = Math.round((profile.visibleWidth - (cols * side + (cols - 1) * gap)) / 2);
+  const fontSize = side < 80 ? 7 : side < 120 ? 8 : 9;
+  for (let i = 0; i < count; i += 1) {
+    const text = `${label} ${i + 1}`;
+    buttons.push(
+      makeButton(text, {
+        X: x0 + (i % cols) * (side + gap),
+        Y: top + Math.floor(i / cols) * (side + gap),
+        Width: side,
+        Height: side,
+        Text: { ...makeButton().Text, Text: text, Font: { Family: 'Arial Black', Size: fontSize, FontStyle: '' } },
+      }),
+    );
+  }
+  return buttons;
+}
+
 export function templateButtons(
   template: TemplateId,
   title = 'NUEVA PANTALLA',
   profile: DesignProfile = PROFILE_1280,
+  headerHeight = 0,
 ): PdtdButton[] {
+  if (profile.cajaOnly) return zonedTemplateButtons(template, title, profile, headerHeight);
   const buttons: PdtdButton[] = [makeTitle(title, profile)];
   if (template === 'blank') return buttons;
   if (template === 'grid3') {
@@ -388,9 +531,17 @@ export function makeScreenFromTemplate(
   index: number,
   title: string,
   profile: DesignProfile = PROFILE_1280,
+  header?: HeaderSettings,
 ): PdtdScreen {
   const screen = makeEmptyScreen(index, `Pantalla${index}`, profile);
-  screen.Body.Buttons = templateButtons(template, title, profile);
+  const headerHeight = profile.cajaOnly && header?.enabled ? clampHeaderHeight(header.height) : 0;
+  if (headerHeight > 0) {
+    setScreenHeader(screen, true, headerHeight);
+    const base = makeHeaderElements(title, headerHeight);
+    screen.Header.Buttons = base.buttons;
+    screen.Header.Texts = base.texts;
+  }
+  screen.Body.Buttons = templateButtons(template, title, profile, headerHeight);
   return screen;
 }
 
@@ -399,7 +550,8 @@ export function createProject(
   profileId: ProfileId = '1280',
 ): Project {
   const profile = profileForId(profileId);
-  const screen = makeScreenFromTemplate('blank', 1, 'MENU PRINCIPAL', profile);
+  const header = profile.cajaOnly ? { ...DEFAULT_HEADER } : undefined;
+  const screen = makeScreenFromTemplate('blank', 1, 'MENU PRINCIPAL', profile, header);
   screen.Id = 'MenuPpal';
   const projectScreen: ProjectScreen = { uid: uid('screen'), compact: screen };
   return {
@@ -411,6 +563,7 @@ export function createProject(
     products: [],
     selectedScreenUid: projectScreen.uid,
     selectedButtonIndex: screen.Body.Buttons.length ? 0 : null,
+    ...(header ? { headerDefaults: header } : {}),
   };
 }
 
@@ -550,6 +703,14 @@ export function normalizeProject(input: unknown): Project {
     selectedButtonIndex,
     selectedZone: selectedButtonIndex === null ? 'Body' : selectedZone,
     selectedKind: selectedButtonIndex === null ? 'button' : selectedKind,
+    ...(isPlainObject(source.headerDefaults)
+      ? {
+          headerDefaults: {
+            enabled: Boolean(source.headerDefaults.enabled),
+            height: clampHeaderHeight(source.headerDefaults.height),
+          },
+        }
+      : {}),
   };
 }
 
@@ -946,7 +1107,15 @@ export function validateProject(project: Project): ValidationIssue[] {
             issues.push({
               ...issueBase,
               // Un recorte de pocos píxeles por arriba o por la izquierda es solo un aviso.
-              level: outside <= 20 && x >= -20 && y >= -20 && x + w <= profile.visibleWidth + 0.5 && y + h <= limitHeight + EDGE_TOLERANCE ? 'warning' : 'error',
+              // En planos con zonas, sobresalir solo por abajo también es aviso: el límite inferior
+              // está medido en una Caja y la imagen centrada del botón suele quedar visible.
+              level:
+                x >= -20 &&
+                y >= -20 &&
+                x + w <= profile.visibleWidth + 0.5 &&
+                (y + h <= limitHeight + EDGE_TOLERANCE || (Boolean(profile.cajaOnly) && zone === 'Body'))
+                  ? 'warning'
+                  : 'error',
               message: `${prefix}“${label}” sale del área visible (${x.toFixed(0)}, ${y.toFixed(0)}, ${w.toFixed(0)}×${h.toFixed(0)}).`,
             });
           }

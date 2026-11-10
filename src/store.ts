@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ElementKind, PdtdButton, ProfileId, Product, Project, ProjectScreen, ViewMode, ZoneId } from './types';
+import type { ElementKind, HeaderSettings, PdtdButton, ProfileId, Product, Project, ProjectScreen, ViewMode, ZoneId } from './types';
 import { profileForId, profileForProject } from './lib/profiles';
 import { convertProjectProfile } from './lib/convert';
 import { loadLocalProject, localStorageFailureMessage, saveLocalProject } from './lib/storage';
@@ -12,6 +12,10 @@ import {
   importProjectText,
   makeButton,
   makeScreenFromTemplate,
+  clampHeaderHeight,
+  headerDefaultsFor,
+  setScreenHeader,
+  fitHeaderElements,
   makeZoneText,
   zoneElements,
   nextScreenIndex,
@@ -34,6 +38,9 @@ interface EditorState {
   message: string | null;
   templateOpen: boolean;
   productsOpen: boolean;
+  /** Plano para el que se está pidiendo confirmar un proyecto nuevo. */
+  pendingNewProfile: ProfileId | null;
+  requestNewProject: (profileId: ProfileId | null) => void;
   setView: (view: ViewMode) => void;
   setScale: (scale: number) => void;
   toggleSnap: () => void;
@@ -60,7 +67,10 @@ interface EditorState {
     next: Project,
     options?: { message?: string; selectedScreenUid?: string; selectedButtonIndex?: number | null },
   ) => void;
-  addScreen: (template: TemplateId, title: string) => void;
+  addScreen: (template: TemplateId, title: string, header?: HeaderSettings) => void;
+  setHeader: (screenUid: string, enabled: boolean, height: number) => void;
+  applyHeaderToAll: (enabled: boolean, height: number) => void;
+  settleHeader: (screenUid: string) => void;
   duplicateScreen: (screenUid: string) => void;
   deleteScreen: (screenUid: string) => void;
   moveScreen: (screenUid: string, direction: -1 | 1) => void;
@@ -126,6 +136,9 @@ export const useEditor = create<EditorState>((set, get) => ({
   message: null,
   templateOpen: false,
   productsOpen: false,
+  pendingNewProfile: null,
+
+  requestNewProject: (pendingNewProfile) => set({ pendingNewProfile }),
 
   setView: (view) => set({ view }),
   setScale: (scale) => set({ scale: Math.min(1.4, Math.max(0.4, scale)) }),
@@ -139,6 +152,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({
       project: createProject(undefined, profileId),
       previewProject: null,
+      pendingNewProfile: null,
       history: [],
       future: [],
       view: 'editor',
@@ -153,7 +167,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       return;
     }
     if (profileForProject(source).cajaOnly || profileForId(profileId).cajaOnly) {
-      set({ message: 'El plano 1024 × 768 se edita tal cual; no se convierte a otros planos.' });
+      // No hay conversión con el plano 1024: se ofrece empezar un proyecto nuevo en ese plano.
+      set({ previewProject: null, pendingNewProfile: profileId });
       return;
     }
     const previewProject = convertProjectProfile(source, profileId);
@@ -188,6 +203,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         return {
           project,
           previewProject: null,
+          pendingNewProfile: null,
           history: [],
           future: [],
           view: 'editor',
@@ -365,7 +381,9 @@ export const useEditor = create<EditorState>((set, get) => ({
         // El alto total de la pantalla se conserva: lo que gana una zona lo cede el cuerpo.
         const previous = Number(compact[zone].Height) || 0;
         const bodyHeight = Number(compact.Body.Height) || 0;
-        const next = Math.max(0, Math.min(patch.Height, previous + bodyHeight - 20));
+        // El encabezado activo no baja a 0 desde el campo de alto; para quitarlo está el interruptor.
+        const floor = zone === 'Header' && previous > 0 ? 1 : 0;
+        const next = Math.max(floor, Math.min(patch.Height, previous + bodyHeight - 20));
         compact[zone].Height = next;
         compact.Body.Height = Math.round((bodyHeight - (next - previous)) * 100) / 100;
       }
@@ -453,18 +471,78 @@ export const useEditor = create<EditorState>((set, get) => ({
       };
     }),
 
-  addScreen: (template, title) => {
+  setHeader: (screenUid, enabled, height) => {
+    const project = get().project;
+    if (!project || get().previewProject) return;
+    const copy = screenCopy(project, screenUid);
+    if (!copy) return;
+    setScreenHeader(copy.screen.compact, enabled, height);
+    const next: Project = {
+      ...copy.project,
+      selectedButtonIndex: null,
+      selectedZone: 'Body',
+      selectedKind: 'button',
+      headerDefaults: { enabled, height: clampHeaderHeight(height) },
+    };
+    set({
+      ...pushHistory(get(), project),
+      project: next,
+      message: enabled ? 'Encabezado activado.' : 'Encabezado quitado. Usa Ctrl+Z para recuperarlo.',
+    });
+  },
+
+  // Al terminar de escribir el alto: se lleva a un valor válido y se ajustan sus elementos.
+  settleHeader: (screenUid) =>
+    set((state) => {
+      if (!state.project) return state;
+      const copy = screenCopy(state.project, screenUid);
+      if (!copy) return state;
+      const compact = copy.screen.compact;
+      const current = Number(compact.Header.Height) || 0;
+      if (current <= 0) return state;
+      const height = clampHeaderHeight(current);
+      if (height !== current) {
+        compact.Body.Height = Math.max(20, Math.round((Number(compact.Body.Height) + current - height) * 100) / 100);
+        compact.Header.Height = height;
+      }
+      fitHeaderElements(compact);
+      return { project: { ...copy.project, headerDefaults: { enabled: true, height } } };
+    }),
+
+  applyHeaderToAll: (enabled, height) => {
+    const project = get().project;
+    if (!project || get().previewProject) return;
+    const next = clone(project);
+    for (const screen of next.screens) setScreenHeader(screen.compact, enabled, height);
+    next.selectedButtonIndex = null;
+    next.selectedZone = 'Body';
+    next.selectedKind = 'button';
+    next.headerDefaults = { enabled, height: clampHeaderHeight(height) };
+    set({
+      ...pushHistory(get(), project),
+      project: next,
+      message: enabled
+        ? `Encabezado de ${clampHeaderHeight(height)} px aplicado a ${next.screens.length} pantallas.`
+        : `Encabezado quitado de ${next.screens.length} pantallas. Usa Ctrl+Z para recuperarlo.`,
+    });
+  },
+
+  addScreen: (template, title, header) => {
     const project = get().project;
     if (!project) return;
     const index = nextScreenIndex(project);
+    const profile = profileForProject(project);
+    const headerSettings = profile.cajaOnly ? header ?? headerDefaultsFor(project) : undefined;
     const compact = makeScreenFromTemplate(
       template,
       index,
       title || `PANTALLA ${index}`,
-      profileForProject(project),
+      profile,
+      headerSettings,
     );
     const screen: ProjectScreen = { uid: uid('screen'), compact };
     const next = clone(project);
+    if (headerSettings) next.headerDefaults = { ...headerSettings, height: clampHeaderHeight(headerSettings.height) };
     next.screens.push(screen);
     next.selectedScreenUid = screen.uid;
     next.selectedButtonIndex = compact.Body.Buttons.length ? 0 : null;

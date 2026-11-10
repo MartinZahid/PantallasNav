@@ -17,7 +17,9 @@ function App() {
   const previewProject = useEditor((state) => state.previewProject);
   const displayProject = previewProject ?? project;
   const profile = profileForProject(displayProject);
-  const view = useEditor((state) => state.view);
+  const storedView = useEditor((state) => state.view);
+  // El plano 1024 no tiene vista de portal.
+  const view = profile.cajaOnly && storedView === 'portal' ? 'editor' : storedView;
   const newProject = useEditor((state) => state.newProject);
   const projectFromLocal = useEditor((state) => state.projectFromLocal);
 

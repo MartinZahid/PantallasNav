@@ -1,3 +1,4 @@
+import { profileForProject } from '../lib/profiles';
 import { useEditor } from '../store';
 
 export function ScreenList() {
@@ -83,9 +84,11 @@ export function ScreenList() {
             <button type="button" className={`nav-link ${view === 'caja' ? 'active' : ''}`} onClick={() => setView('caja')}>
               Vista Caja
             </button>
-            <button type="button" className={`nav-link ${view === 'portal' ? 'active' : ''}`} onClick={() => setView('portal')}>
-              Vista Portal
-            </button>
+            {profileForProject(shown).cajaOnly ? null : (
+              <button type="button" className={`nav-link ${view === 'portal' ? 'active' : ''}`} onClick={() => setView('portal')}>
+                Vista Portal
+              </button>
+            )}
           </div>
         </div>
       </nav>

@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
 import type { ElementKind, PdtdButton, ZoneId } from '../types';
-import { ZONES, ZONE_LABELS, clone, elementAsButton, hasZone, isTitle, makeTitle, textAsButton, zoneElements } from '../lib/pdtd';
+import { MAX_HEADER_HEIGHT, MIN_HEADER_HEIGHT, ZONES, ZONE_LABELS, clampHeaderHeight, clone, headerDefaultsFor, elementAsButton, hasZone, isTitle, makeTitle, textAsButton, zoneElements } from '../lib/pdtd';
 import { profileForProject } from '../lib/profiles';
 import type { FontStyleKey, HorizontalAlignment, VerticalAlignment } from '../lib/textStyle';
-import { composeAlignment, imageDataUrl, parseFontStyles, splitAlignment, toggleFontStyle } from '../lib/textStyle';
+import { composeAlignment, imageDataUrl, imageFit, parseFontStyles, splitAlignment, toggleFontStyle } from '../lib/textStyle';
 import { useEditor } from '../store';
 import { ActionsEditor } from './ActionsEditor';
 
@@ -68,6 +68,7 @@ function NumberField({
   value,
   onChange,
   onFocus,
+  onBlur,
   min,
   max,
 }: {
@@ -75,6 +76,7 @@ function NumberField({
   value: number;
   onChange: (value: number) => void;
   onFocus: () => void;
+  onBlur?: () => void;
   min?: number;
   max?: number;
 }) {
@@ -88,6 +90,7 @@ function NumberField({
         max={max}
         step={0.5}
         onFocus={onFocus}
+        onBlur={onBlur}
         onChange={(event) => onChange(Number(event.target.value))}
       />
     </label>
@@ -552,7 +555,7 @@ function ButtonEditor({ part }: { part: 'props' | 'actions' }) {
         <input ref={imageInput} type="file" accept="image/*" hidden onChange={(event) => uploadImage(event.target.files?.[0])} />
         <label className="field">
           <span>Ajuste</span>
-          <select value={button.Icon.SizeMode || 'Strech'} onFocus={beginTransaction} onChange={(event) => setIcon({ SizeMode: event.target.value })}>
+          <select value={imageFit(button.Icon.SizeMode).backgroundSize === 'contain' ? 'Zoom' : 'Strech'} onFocus={beginTransaction} onChange={(event) => setIcon({ SizeMode: event.target.value })}>
             <option value="Strech">Estirar a todo el botón</option>
             <option value="Zoom">Ajustar sin deformar</option>
           </select>
@@ -580,11 +583,18 @@ function ScreenEditor() {
   const updateScreen = useEditor((state) => state.updateScreen);
   const updateZone = useEditor((state) => state.updateZone);
   const addZoneElement = useEditor((state) => state.addZoneElement);
+  const setHeader = useEditor((state) => state.setHeader);
+  const applyHeaderToAll = useEditor((state) => state.applyHeaderToAll);
+  const settleHeader = useEditor((state) => state.settleHeader);
   const addButton = useEditor((state) => state.addButton);
   const beginTransaction = useEditor((state) => state.beginTransaction);
   const duplicateScreen = useEditor((state) => state.duplicateScreen);
   const screen = project?.screens.find((item) => item.uid === project.selectedScreenUid);
   if (!project || !screen) return null;
+  const headerOn = Number(screen.compact.Header.Height) > 0;
+  const headerHeight = headerOn
+    ? clampHeaderHeight(screen.compact.Header.Height)
+    : headerDefaultsFor(project).height;
   return (
     <div className="properties-body">
       <div className="selection-title">
@@ -605,28 +615,53 @@ function ScreenEditor() {
         <div className="muted tiny">Cuerpo: {screen.compact.Body.Width} x {screen.compact.Body.Height}. Area visible: {profile.visibleWidth} x {profile.visibleHeight}.</div>
       </div>
       {profile.cajaOnly || hasZone(screen.compact, 'Header') || hasZone(screen.compact, 'Footer') ? (
-        <div className="section">
-          <div className="section-title">Encabezado y pie</div>
-          <div className="grid-2">
-            <NumberField label="Alto encabezado" value={Number(screen.compact.Header.Height) || 0} min={0} onFocus={beginTransaction} onChange={(value) => updateZone(screen.uid, 'Header', { Height: value })} />
-            <ColorField label="Fondo encabezado" value={screen.compact.Header.BackColor} onFocus={beginTransaction} onChange={(value) => updateZone(screen.uid, 'Header', { BackColor: value })} />
+        <>
+          <div className="section">
+            <div className="section-title">Encabezado</div>
+            <label className="toggle" htmlFor="screen-header-enabled">
+              <input
+                id="screen-header-enabled"
+                type="checkbox"
+                checked={headerOn}
+                onChange={(event) => setHeader(screen.uid, event.target.checked, headerHeight)}
+              />
+              <span>Usar encabezado en esta pantalla</span>
+            </label>
+            {headerOn ? (
+              <>
+                <div className="grid-2">
+                  <NumberField label="Alto (px)" value={Number(screen.compact.Header.Height) || 0} min={MIN_HEADER_HEIGHT} max={MAX_HEADER_HEIGHT} onFocus={beginTransaction} onBlur={() => settleHeader(screen.uid)} onChange={(value) => updateZone(screen.uid, 'Header', { Height: value })} />
+                  <ColorField label="Fondo" value={screen.compact.Header.BackColor} onFocus={beginTransaction} onChange={(value) => updateZone(screen.uid, 'Header', { BackColor: value })} />
+                </div>
+                <div className="button-row">
+                  <button type="button" className="wide-button" onClick={() => addZoneElement('Header', 'button')}>+ Botón de encabezado</button>
+                  <button type="button" className="wide-button" onClick={() => addZoneElement('Header', 'text')}>+ Título de encabezado</button>
+                </div>
+              </>
+            ) : (
+              <p className="muted small">Sin encabezado, toda la pantalla es cuerpo. Al activarlo se agregan el título y los iconos de inicio y regresar.</p>
+            )}
+            <div className="button-row">
+              <button type="button" className="small-button" onClick={() => applyHeaderToAll(headerOn, headerHeight)}>
+                {headerOn ? `Usar este alto (${headerHeight} px) en todas las pantallas` : 'Quitar el encabezado de todas las pantallas'}
+              </button>
+            </div>
+            <div className="muted tiny">El alto del cuerpo se ajusta solo para conservar el alto total de la pantalla.</div>
           </div>
-          <div className="button-row">
-            <button type="button" className="wide-button" onClick={() => addZoneElement('Header', 'button')}>+ Botón de encabezado</button>
-            <button type="button" className="wide-button" onClick={() => addZoneElement('Header', 'text')}>+ Título de encabezado</button>
+          <div className="section">
+            <div className="section-title">Pie</div>
+            <div className="grid-2">
+              <NumberField label="Alto (px)" value={Number(screen.compact.Footer.Height) || 0} min={0} onFocus={beginTransaction} onChange={(value) => updateZone(screen.uid, 'Footer', { Height: value })} />
+              <ColorField label="Fondo" value={screen.compact.Footer.BackColor} onFocus={beginTransaction} onChange={(value) => updateZone(screen.uid, 'Footer', { BackColor: value })} />
+            </div>
           </div>
-          <div className="grid-2">
-            <NumberField label="Alto pie" value={Number(screen.compact.Footer.Height) || 0} min={0} onFocus={beginTransaction} onChange={(value) => updateZone(screen.uid, 'Footer', { Height: value })} />
-            <ColorField label="Fondo pie" value={screen.compact.Footer.BackColor} onFocus={beginTransaction} onChange={(value) => updateZone(screen.uid, 'Footer', { BackColor: value })} />
-          </div>
-          <div className="muted tiny">El alto del cuerpo se ajusta solo para conservar el alto total de la pantalla.</div>
-        </div>
+        </>
       ) : null}
       <div className="section">
         <div className="section-title">Crear</div>
         <div className="button-row">
           <button type="button" className="wide-button" onClick={addButton}>+ Botón</button>
-          {profile.cajaOnly ? null : (
+          {hasZone(screen.compact, 'Header') ? null : (
             <button type="button" className="wide-button" onClick={() => { beginTransaction(); const title = clone(makeTitle('NUEVO TITULO', profile)); updateButtonAppend(screen.uid, title); }}>+ Título</button>
           )}
         </div>

@@ -30,7 +30,7 @@ El proyecto no usa servidor propio. Se puede publicar como sitio est?tico.
 | --- | --- | --- | --- | --- |
 | 1280 ? 1024 | 588 ? 843 | 768 ? 1024 | 1280 ? 1024 | 1181 ? 708 |
 | 1920 ? 1080 | 975 ? 863 | 1152 ? 1080 | 1920 ? 1080 | 1181 ? 713 |
-| 1024 × 768 | 470.4 × 674.4 | 614.4 × 768 (Encabezado + Cuerpo + Pie) | solo Caja | no aplica |
+| 1024 × 768 | 494 × 587 | 614.4 × 768 (Encabezado + Cuerpo + Pie) | solo Caja | no aplica |
 
 Al cambiar el selector de plano:
 
@@ -42,7 +42,7 @@ La conversi?n reacomoda los botones en cuadr?culas cuadradas dentro del ?rea vis
 
 ### Plano 1024 × 768 (solo Caja)
 
-Al importar una Caja cuyo ancho de zona es 614.4 se detecta el plano **1024 × 768**. Estas pantallas se reparten en tres zonas apiladas:
+El plano **1024 × 768** se elige en el selector de plano (crea un proyecto nuevo) o se detecta al importar una Caja cuyo ancho de zona es 614.4. Estas pantallas se reparten en tres zonas apiladas:
 
 - **Encabezado**: título de la pantalla (`Header.Texts`) e iconos de regresar / terminar (`Header.Buttons`).
 - **Cuerpo**: los botones de producto y navegación.
@@ -55,7 +55,10 @@ En este plano:
 - La vista **Caja** simula `gotoScreen`, `rewind` (regresar) y `reset` (volver a la primera pantalla).
 - Solo se exporta **Caja**: no hay archivo Web ni conversión a 1280 / 1080. Una Caja importada y exportada sin cambios queda idéntica a la original.
 - Los colores, fuentes y tamaños vacíos del archivo se respetan (botones solo-imagen); el editor solo usa valores por defecto para dibujar.
-- El área visible (470.4 × 674.4) está deducida escalando el plano 1280 por 0.8; conviene confirmarla en el POS.
+- El **encabezado es opcional**: se activa o se quita por pantalla, se elige su alto (30 a 200 px) y se puede aplicar el mismo a todas las pantallas. Al activarlo se agregan el título y los iconos de inicio y regresar; el diálogo de nueva pantalla recuerda la última elección.
+- La vista **Caja** dibuja como el POS: escala 1:1, sin bordes, y las imágenes con ajuste vacío o "Zoom" se muestran sin deformar y centradas (solo "Strech" estira).
+- El área visible (494 × 587) está medida sobre una captura real de la Caja: la navegación empieza en x = 530, y = 56 de la pantalla de 1024 × 768.
+- Entre 1024 y 1280 / 1080 no hay conversión: al cambiar de plano se ofrece crear un proyecto nuevo.
 
 ## Funciones principales
 

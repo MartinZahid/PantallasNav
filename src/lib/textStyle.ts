@@ -122,3 +122,15 @@ export function fontPixels(size: unknown, fallback = 9): number {
   const value = Number(size);
   return Math.max(7, Math.round((Number.isFinite(value) && value > 0 ? value : fallback) * 1.33));
 }
+
+/** Color con que la Caja dibuja un texto que no define color. */
+export const DEFAULT_TEXT_COLOR = 'rgb(79, 79, 79)';
+
+/**
+ * Ajuste de la imagen de un botón. La Caja estira solo con "Strech"; con el valor
+ * vacío o "Zoom" la imagen se ajusta sin deformar y queda centrada.
+ */
+export function imageFit(sizeMode: string | null | undefined): { backgroundSize: string; backgroundPosition: string } {
+  const stretch = String(sizeMode ?? '').toLowerCase().startsWith('str');
+  return { backgroundSize: stretch ? '100% 100%' : 'contain', backgroundPosition: 'center' };
+}

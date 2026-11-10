@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import type { TemplateId } from '../lib/pdtd';
+import { MAX_HEADER_HEIGHT, MIN_HEADER_HEIGHT, clampHeaderHeight, headerDefaultsFor } from '../lib/pdtd';
+import { profileForProject } from '../lib/profiles';
 import { useEditor } from '../store';
 
 const TEMPLATES: { id: TemplateId; name: string; description: string; preview: string }[] = [
@@ -15,6 +17,9 @@ function TemplatesDialog({ screenCount, onClose }: { screenCount: number; onClos
   const addScreen = useEditor((state) => state.addScreen);
   const [title, setTitle] = useState(() => `PANTALLA ${screenCount + 1}`);
   const [template, setTemplate] = useState<TemplateId>('grid3');
+  const project = useEditor((state) => state.project);
+  const zoned = Boolean(profileForProject(project).cajaOnly);
+  const [header, setHeader] = useState(() => headerDefaultsFor(project));
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -30,6 +35,31 @@ function TemplatesDialog({ screenCount, onClose }: { screenCount: number; onClos
           <span>Nombre de la pantalla</span>
           <input value={title} onChange={(event) => setTitle(event.target.value)} autoFocus />
         </label>
+        {zoned ? (
+          <div className="header-options">
+            <label className="toggle" htmlFor="new-screen-header">
+              <input
+                id="new-screen-header"
+                type="checkbox"
+                checked={header.enabled}
+                onChange={(event) => setHeader({ ...header, enabled: event.target.checked })}
+              />
+              <span>Con encabezado (título, inicio y regresar)</span>
+            </label>
+            <label className="field inline-field" htmlFor="new-screen-header-height">
+              <span>Alto (px)</span>
+              <input
+                id="new-screen-header-height"
+                type="number"
+                min={MIN_HEADER_HEIGHT}
+                max={MAX_HEADER_HEIGHT}
+                value={header.height}
+                disabled={!header.enabled}
+                onChange={(event) => setHeader({ ...header, height: Number(event.target.value) })}
+              />
+            </label>
+          </div>
+        ) : null}
         <div className="template-grid">
           {TEMPLATES.map((item) => (
             <button
@@ -56,7 +86,13 @@ function TemplatesDialog({ screenCount, onClose }: { screenCount: number; onClos
           <button
             type="button"
             className="primary-button"
-            onClick={() => addScreen(template, title.trim() || 'NUEVA PANTALLA')}
+            onClick={() =>
+              addScreen(
+                template,
+                title.trim() || 'NUEVA PANTALLA',
+                zoned ? { enabled: header.enabled, height: clampHeaderHeight(header.height) } : undefined,
+              )
+            }
           >
             Crear pantalla
           </button>
